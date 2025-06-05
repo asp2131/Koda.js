@@ -1,146 +1,229 @@
 import * as vscode from 'vscode';
-import { ExpressionParser, ParseResult, ExpressionInfo } from './evaluator/parser';
+import * as acorn from 'acorn'; // Import acorn for type assertions
+import { ExpressionParser, ExpressionInfo, ParseResult } from './evaluator/parser';
 import { SafeEvaluator } from './evaluator/engine';
-import { ResultDecorator, EvaluationResultDisplay } from './decorations/resultDecorator'; // Import decorator
+import { ResultDecorator, EvaluationResultDisplay } from './decorations/resultDecorator';
 
-// This diagnostic collection will be used to display errors in the editor
-let diagnosticCollection: vscode.DiagnosticCollection;
+// Global state for live evaluation
+let isLiveEvaluationActive: boolean = false;
+let textDocumentChangeDisposable: vscode.Disposable | undefined;
+let liveEvaluationStatusBarItem: vscode.StatusBarItem;
+let debounceTimer: NodeJS.Timeout | undefined;
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+// Global diagnostics collection, initialized in activate
+let diagnostics: vscode.DiagnosticCollection;
 
-    // Use the console to output diagnostic information (console.log) and errors (console.error)
-    // This line of code will only be executed once when your extension is activated
-    console.log('Congratulations, your extension "vscode-js-evaluator" is now active!');
+async function evaluateEditor(
+    editor: vscode.TextEditor,
+    parser: ExpressionParser,
+    evaluator: SafeEvaluator,
+    resultDecorator: ResultDecorator,
+    currentDiagnostics: vscode.DiagnosticCollection
+) {
+    if (!editor) {
+        return;
+    }
 
-    // Create a diagnostic collection for our extension
-    diagnosticCollection = vscode.languages.createDiagnosticCollection('javascriptEvaluator');
-    context.subscriptions.push(diagnosticCollection); // Ensure it's disposed when the extension deactivates
+    if (editor.document.languageId !== 'javascript' && editor.document.languageId !== 'typescript') {
+        if (!isLiveEvaluationActive) {
+            vscode.window.showInformationMessage('Please use this extension with a JavaScript or TypeScript file.');
+        }
+        return;
+    }
 
-    // Initialize the parser
-    const parser = new ExpressionParser();
-    // Initialize the evaluator
-    const evaluator = new SafeEvaluator();
-    // Initialize the result decorator
-    const resultDecorator = new ResultDecorator();
-    context.subscriptions.push(resultDecorator); // Ensure it's disposed
+    resultDecorator.clearDecorations(editor);
+    currentDiagnostics.clear();
 
-    // The command has been defined in the package.json file
-    // Now provide the implementation of the command with registerCommand
-    // The commandId parameter must match the command field in package.json
-    let disposableStart = vscode.commands.registerCommand('jsEvaluator.startLiveEvaluation', () => {
-        // The code you place here will be executed every time your command is executed
-        vscode.window.showInformationMessage('JS Evaluator: Live Evaluation Started!');
-    });
+    const document = editor.document;
+    const parseOutput: ParseResult = parser.parseDocument(document); // Corrected: pass only document
+    const expressions: ExpressionInfo[] = parseOutput.expressions;
+    const syntaxDiagnosticsFromParser: vscode.Diagnostic[] = parseOutput.diagnostics;
 
-    let disposableStop = vscode.commands.registerCommand('jsEvaluator.stopLiveEvaluation', () => {
-        vscode.window.showInformationMessage('JS Evaluator: Live Evaluation Stopped!');
-    });
+    if (syntaxDiagnosticsFromParser.length > 0) {
+        currentDiagnostics.set(document.uri, syntaxDiagnosticsFromParser);
+        if (!isLiveEvaluationActive) {
+            vscode.window.showErrorMessage('Syntax errors found. See Problems panel.');
+        }
+    }
 
-    let disposableEvaluate = vscode.commands.registerCommand('jsEvaluator.evaluateSelection', () => {
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-            const document = editor.document;
+    if (expressions.length === 0) {
+        if (!isLiveEvaluationActive && syntaxDiagnosticsFromParser.length === 0) {
+            vscode.window.showInformationMessage('No JavaScript expressions found to evaluate.');
+        }
+        return;
+    }
 
-            // Clear previous diagnostics for this document
-            diagnosticCollection.delete(document.uri);
-            // Clear previous result decorations
-            resultDecorator.clearDecorations(editor);
-
-            // Parse the whole document
-            const parseResult: ParseResult = parser.parseDocument(document);
-
-            // Add new diagnostics, if any
-            if (parseResult.diagnostics.length > 0) {
-                diagnosticCollection.set(document.uri, parseResult.diagnostics);
-            }
-
-            // Log the parsed expressions to the console (for debugging)
-            console.log(`Parsed expressions:`, parseResult.expressions);
-            if (parseResult.diagnostics.length > 0) {
-                vscode.window.showWarningMessage(`Found ${parseResult.diagnostics.length} syntax problem(s). Evaluation skipped. Check 'Problems' panel.`);
-            } else if (parseResult.expressions.length > 0) {
-                vscode.window.showInformationMessage(`Parsed ${parseResult.expressions.length} expressions. Evaluating...`);
-                
-                const displayableResults: EvaluationResultDisplay[] = [];
-                
-                // Create a single context for this evaluation session.
-                // The logOutput callback will now receive the range of the expression that triggered the log.
-                const evaluationContext = evaluator.createContext((logMessage: string, expressionRange?: vscode.Range) => {
-                    console.log(`[Sandbox Log]: ${logMessage}`);
-                    if (expressionRange) {
-                        displayableResults.push({
-                            text: logMessage,
-                            originalRange: expressionRange,
-                            isLog: true,
-                        });
-                    } else {
-                        // Log message couldn't be associated with a specific expression range
-                        // This might happen if console.log is called from a deeply nested async callback not directly tied to an expression's execution scope
-                        // Or if the __currentExpressionRange wasn't set/cleared properly in a complex scenario.
-                        // For now, these will just go to the DevTools console.
-                        console.log(`[Sandbox Log - Unassociated]: ${logMessage}`);
-                    }
-                });
-
-                // Evaluate each expression in the same context
-                parseResult.expressions.forEach((expr: ExpressionInfo, index: number) => {
-                    console.log(`Evaluating expression #${index + 1}: '${expr.text}'`);
-                    // Pass the expression text, its range, and the shared context to each evaluation call
-                    const evaluationResult = evaluator.evaluate(expr.text, expr.range, evaluationContext);
-
-                    // Check if the expression is a console.log call. 
-                    // We generally don't display the result of `console.log()` itself (which is `undefined`)
-                    // as its output is handled by the logger in `createContext`.
-                    const isConsoleLogCall = expr.text.trim().startsWith('console.log(');
-
-                    if (evaluationResult.error) {
-                        console.error(`Error evaluating expression #${index + 1} ('${expr.text}'):`, evaluationResult.error);
-                        displayableResults.push({
-                            text: String(evaluationResult.error),
-                            originalRange: expr.range,
-                            isError: true,
-                        });
-                    } else {
-                        console.log(`Result for expression #${index + 1} ('${expr.text}'):`, evaluationResult.result);
-                        // Only display a result if it's not undefined and not a console.log call itself
-                        if (evaluationResult.result !== undefined && !isConsoleLogCall) {
-                            displayableResults.push({
-                                text: String(evaluationResult.result),
-                                originalRange: expr.range,
-                            });
-                        }
-                    }
-                });
-
-                console.log('[Extension] displayableResults count before calling decorator:', displayableResults.length);
-                if (displayableResults.length > 0) {
-                    // Sort results by line number to ensure decorations are processed in order, though VS Code might handle this.
-                    displayableResults.sort((a, b) => a.originalRange.start.line - b.originalRange.start.line);
-                    console.log('[Extension] displayableResults content before calling decorator:', JSON.stringify(displayableResults, null, 2));
-                    resultDecorator.displayResults(editor, displayableResults);
-                } else {
-                    console.log('[Extension] No displayable results to send to decorator.');
-                }
-
-            } else {
-                vscode.window.showInformationMessage('No expressions found to evaluate.');
-            }
-
+    const displayableResults: EvaluationResultDisplay[] = [];
+    const evaluationContext = evaluator.createContext((logMessage: string, expressionRange?: vscode.Range) => {
+        if (expressionRange) {
+            displayableResults.push({
+                text: logMessage,
+                originalRange: expressionRange,
+                isLog: true,
+            });
         } else {
-            vscode.window.showWarningMessage('No active editor found to evaluate JavaScript.');
+            console.log(`[Sandbox Log - Unassociated in evaluateEditor]: ${logMessage}`);
         }
     });
 
-    let disposableClear = vscode.commands.registerCommand('jsEvaluator.clearAllResults', () => {
-        vscode.window.showInformationMessage('JS Evaluator: All results cleared (placeholder)!');
-    });
+    for (const expr of expressions) { // Using for...of for cleaner iteration
+        try {
+            (evaluationContext as any).__currentExpressionRange = expr.range;
+            // Corrected argument order and variable name for evaluation output
+            const evaluationOutput = evaluator.evaluate(expr.text, expr.range, evaluationContext);
+            delete (evaluationContext as any).__currentExpressionRange;
 
-    context.subscriptions.push(disposableStart, disposableStop, disposableEvaluate, disposableClear);
+            if (evaluationOutput.error) {
+                displayableResults.push({ text: evaluationOutput.error, originalRange: expr.range, isError: true });
+            } else {
+                let isConsoleLogCall = false;
+                const node = expr.node; // node is acorn.Node
+                if (node.type === 'ExpressionStatement') {
+                    // Type assertion for ExpressionStatement
+                    const expressionStatement = node as acorn.ExpressionStatement;
+                    if (expressionStatement.expression.type === 'CallExpression') {
+                        // Type assertion for CallExpression
+                        const callExpression = expressionStatement.expression as acorn.CallExpression;
+                        if (callExpression.callee.type === 'MemberExpression') {
+                            // Type assertion for MemberExpression
+                            const memberExpression = callExpression.callee as acorn.MemberExpression;
+                            if (memberExpression.object.type === 'Identifier') {
+                                // Type assertion for Identifier
+                                const identifier = memberExpression.object as acorn.Identifier;
+                                if (identifier.name === 'console') {
+                                    isConsoleLogCall = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (evaluationOutput.result !== undefined && !isConsoleLogCall) {
+                    displayableResults.push({ text: String(evaluationOutput.result), originalRange: expr.range });
+                }
+            }
+        } catch (e: any) {
+            console.error(`[evaluateEditor] Error evaluating expression '${expr.text}':`, e);
+            delete (evaluationContext as any).__currentExpressionRange; // Ensure cleanup on error too
+            displayableResults.push({ text: e.message || 'Unknown evaluation error', originalRange: expr.range, isError: true });
+        }
+    }
+
+    if (displayableResults.length > 0) {
+        displayableResults.sort((a, b) => a.originalRange.start.line - b.originalRange.start.line);
+        resultDecorator.displayResults(editor, displayableResults);
+    }
 }
 
-// This method is called when your extension is deactivated
+export function activate(context: vscode.ExtensionContext) {
+    console.log('Congratulations, your extension "vscode-js-evaluator" is now active!');
+
+    diagnostics = vscode.languages.createDiagnosticCollection("javascriptEvaluator");
+    context.subscriptions.push(diagnostics);
+
+    const parser = new ExpressionParser();
+    const evaluator = new SafeEvaluator();
+    const resultDecorator = new ResultDecorator();
+
+    liveEvaluationStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    context.subscriptions.push(liveEvaluationStatusBarItem);
+
+    const evaluateSelectionCommand = vscode.commands.registerCommand('jsEvaluator.evaluateSelection', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics);
+        }
+    });
+
+    const startLiveEvaluationCommand = vscode.commands.registerCommand('jsEvaluator.startLiveEvaluation', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showInformationMessage('Open a JavaScript/TypeScript file to start live evaluation.');
+            return;
+        }
+        if (editor.document.languageId !== 'javascript' && editor.document.languageId !== 'typescript') {
+            vscode.window.showInformationMessage('Live evaluation only works for JavaScript/TypeScript files.');
+            return;
+        }
+
+        isLiveEvaluationActive = true;
+        liveEvaluationStatusBarItem.text = "$(zap) JS Live";
+        liveEvaluationStatusBarItem.tooltip = "JavaScript Live Evaluation is Active";
+        liveEvaluationStatusBarItem.show();
+        
+        console.log('Starting live evaluation...');
+        await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics);
+
+        if (textDocumentChangeDisposable) {
+            textDocumentChangeDisposable.dispose();
+        }
+        textDocumentChangeDisposable = vscode.workspace.onDidChangeTextDocument(event => {
+            if (isLiveEvaluationActive && event.document === vscode.window.activeTextEditor?.document) {
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                debounceTimer = setTimeout(async () => {
+                    const currentEditor = vscode.window.activeTextEditor;
+                    if (currentEditor) {
+                         await evaluateEditor(currentEditor, parser, evaluator, resultDecorator, diagnostics);
+                    }
+                }, 500);
+            }
+        });
+        context.subscriptions.push(textDocumentChangeDisposable);
+        vscode.window.showInformationMessage('JavaScript Live Evaluation Started.');
+    });
+
+    const stopLiveEvaluationCommand = vscode.commands.registerCommand('jsEvaluator.stopLiveEvaluation', () => {
+        console.log('Stopping live evaluation...');
+        isLiveEvaluationActive = false;
+        liveEvaluationStatusBarItem.hide();
+        
+        if (textDocumentChangeDisposable) {
+            textDocumentChangeDisposable.dispose();
+            textDocumentChangeDisposable = undefined;
+        }
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = undefined;
+        }
+        
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            resultDecorator.clearDecorations(editor);
+            diagnostics.clear(); 
+        }
+        vscode.window.showInformationMessage('JavaScript Live Evaluation Stopped.');
+    });
+    
+    const clearAllResultsCommand = vscode.commands.registerCommand('jsEvaluator.clearAllResults', () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            resultDecorator.clearDecorations(editor);
+            diagnostics.clear();
+            vscode.window.showInformationMessage('All evaluation results and diagnostics cleared.');
+        } else {
+            vscode.window.showInformationMessage('No active editor to clear results from.');
+        }
+    });
+
+    context.subscriptions.push(
+        evaluateSelectionCommand, 
+        startLiveEvaluationCommand, 
+        stopLiveEvaluationCommand,
+        clearAllResultsCommand
+    );
+}
+
 export function deactivate() {
     console.log('Your extension "vscode-js-evaluator" is now deactivated.');
+    if (textDocumentChangeDisposable) {
+        textDocumentChangeDisposable.dispose();
+    }
+    if (liveEvaluationStatusBarItem) {
+        liveEvaluationStatusBarItem.dispose();
+    }
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+    }
 }
