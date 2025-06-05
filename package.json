@@ -1,0 +1,107 @@
+{
+  "name": "vscode-js-evaluator",
+  "displayName": "JavaScript Evaluator",
+  "description": "Inline JavaScript evaluation similar to Quokka.js",
+  "version": "0.0.1",
+  "publisher": "your-publisher-name",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Education",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "jsEvaluator.startLiveEvaluation",
+        "title": "JS Evaluator: Start Live Evaluation",
+        "category": "JSEvaluator"
+      },
+      {
+        "command": "jsEvaluator.stopLiveEvaluation",
+        "title": "JS Evaluator: Stop Live Evaluation",
+        "category": "JSEvaluator"
+      },
+      {
+        "command": "jsEvaluator.evaluateSelection",
+        "title": "JS Evaluator: Evaluate Selection",
+        "category": "JSEvaluator"
+      },
+      {
+        "command": "jsEvaluator.clearAllResults",
+        "title": "JS Evaluator: Clear All Results",
+        "category": "JSEvaluator"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "jsEvaluator.startLiveEvaluation",
+        "key": "ctrl+shift+k",
+        "mac": "cmd+shift+k",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "JavaScript Evaluator",
+      "properties": {
+        "jsEvaluator.liveEvaluation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable live evaluation of JavaScript code."
+        },
+        "jsEvaluator.evaluationDelay": {
+          "type": "number",
+          "default": 500,
+          "description": "Delay in milliseconds before evaluating after typing stops (for live evaluation)."
+        },
+        "jsEvaluator.maxResultLength": {
+          "type": "integer",
+          "default": 100,
+          "description": "Maximum length of the string representation of an evaluation result displayed inline."
+        },
+        "jsEvaluator.showInlineResults": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show evaluation results inline in the editor."
+        },
+        "jsEvaluator.showHoverDetails": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show detailed evaluation results on hover."
+        },
+        "jsEvaluator.executionTimeout": {
+          "type": "integer",
+          "default": 3000,
+          "description": "Execution timeout in milliseconds for JavaScript evaluation to prevent infinite loops."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "16.x",
+    "@types/mocha": "^10.0.0",
+    "typescript": "^4.9.0",
+    "eslint": "^8.28.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@vscode/test-electron": "^2.3.0"
+  },
+  "dependencies": {
+    "acorn": "^8.8.0" 
+  }
+}

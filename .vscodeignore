@@ -1,0 +1,18 @@
+.vscode/**
+.vscode-test/**
+node_modules/**
+src/**
+out/test/**
+*.vsix
+*.log
+
+# Allow specific files in out if needed, but generally out is built from src
+# The main entry point is defined in package.json as ./out/extension.js
+# Ensure that essential build artifacts are NOT ignored if they are not in standard locations.
+
+# Keep media files
+!media/**
+
+# Keep compiled output for the extension itself
+!out/extension.js
+!out/extension.js.map
