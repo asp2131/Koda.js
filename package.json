@@ -2,8 +2,8 @@
   "name": "vscode-js-evaluator",
   "displayName": "JavaScript Evaluator",
   "description": "Inline JavaScript evaluation similar to Quokka.js",
-  "version": "0.0.1",
-  "publisher": "AkintundePounds",
+  "version": "0.0.4",
+  "publisher": "akintundepounds",
   "engines": {
     "vscode": "^1.74.0"
   },
