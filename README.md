@@ -1,5 +1,9 @@
 # Koda.js
 
+<p align="center">
+  <img src="images/icon.png" alt="Koda.js Logo" width="128" height="128">
+</p>
+
 A powerful VS Code extension for real-time JavaScript evaluation and inline code execution. Experience immediate feedback as you write JavaScript code with live results displayed directly in your editor.
 
 ## 🚀 Features
