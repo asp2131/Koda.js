@@ -1,6 +1,6 @@
 .vscode/**
 .vscode-test/**
-node_modules/**
+# node_modules/** (Removed to include runtime dependencies like acorn)
 src/**
 out/test/**
 *.vsix

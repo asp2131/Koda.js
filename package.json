@@ -2,7 +2,7 @@
   "name": "vscode-js-evaluator",
   "displayName": "Koda.js",
   "description": "Inline JavaScript evaluation similar to Quokka.js",
-  "version": "0.0.5",
+  "version": "0.0.7",
   "publisher": "akintundepounds",
   "icon": "images/icon.png",
   "engines": {

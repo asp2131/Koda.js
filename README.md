@@ -1,70 +1,76 @@
-# VS Code JavaScript Console Extension
+# Koda.js
 
-A VS Code extension that provides inline JavaScript execution and evaluation, similar to Quokka.js, for environments where browser developer tools are restricted or unavailable.
+A powerful VS Code extension for real-time JavaScript evaluation and inline code execution. Experience immediate feedback as you write JavaScript code with live results displayed directly in your editor.
 
-## Overview
+## 🚀 Features
 
-This extension enables real-time JavaScript evaluation directly in your code editor, showing results inline as you type. Perfect for students and developers who need to test JavaScript code without access to browser developer tools or Node.js environments.
+- **Live Evaluation**: See JavaScript results instantly as you type
+- **Inline Results**: Code outputs appear right next to your expressions
+- **Error Highlighting**: Syntax and runtime errors highlighted with clear diagnostics
+- **Smart Parsing**: Advanced AST-based parsing for accurate code analysis
+- **Zero Setup**: Works out of the box with no configuration required
+- **Safe Execution**: Sandboxed evaluation environment with timeout protection
 
-## Features
-
-- **Inline Evaluation**: See JavaScript results directly next to your code
-- **Live Execution**: Run code as you type with configurable delay
-- **Value Inspector**: Hover over variables to see their current values
-- **Error Highlighting**: Syntax and runtime errors highlighted inline
-- **Expression Evaluation**: Evaluate selected expressions instantly
-- **No External Dependencies**: Works entirely within VS Code environment
-
-## Installation
+## 📦 Installation
 
 ### From VS Code Marketplace
 1. Open VS Code
-2. Go to Extensions (Ctrl+Shift+X)
-3. Search for "JavaScript Console"
+2. Go to Extensions (`Ctrl+Shift+X`)
+3. Search for "Koda.js"
 4. Click Install
 
-### Development Installation
-1. Clone this repository
-2. Run `npm install`
-3. Press F5 to open Extension Development Host
-4. Open Command Palette (Ctrl+Shift+P)
-5. Type "JavaScript Console: Open"
+### Quick Start
+1. Open any JavaScript file
+2. Press `Ctrl+Shift+K` (or `Cmd+Shift+K` on Mac)
+3. Start typing JavaScript code and see results instantly!
 
-## Usage
+## 🎯 Usage
 
-### Opening Inline Evaluation
-- **Command Palette**: `Ctrl+Shift+P` → "JS Evaluator: Start Live Evaluation"
-- **Keybinding**: `Ctrl+Shift+K` (customizable)
-- **File Types**: Automatically activates for `.js` files
-
-### Basic Operations
+### Live Evaluation
 ```javascript
-let name = "World";          // → undefined
-let greeting = `Hello, ${name}!`;  // → "Hello, World!"
-console.log(greeting);       // → Hello, World! (in output channel)
+let name = "Koda";                    // → undefined
+let greeting = `Hello, ${name}!`;     // → "Hello, Koda!"
+console.log(greeting);                // → Hello, Koda!
 
-// Math operations show inline
-let result = 5 * 8;          // → 40
-Math.sqrt(16);               // → 4
+// Math operations
+let result = 42 * 1.5;               // → 63
+Math.sqrt(144);                      // → 12
 
-// Array operations
-let numbers = [1, 2, 3];     // → [1, 2, 3]
-numbers.map(x => x * 2);     // → [2, 4, 6]
+// Array operations  
+let numbers = [1, 2, 3, 4, 5];       // → [1, 2, 3, 4, 5]
+numbers.map(x => x * 2);             // → [2, 4, 6, 8, 10]
+numbers.filter(x => x > 3);          // → [4, 5]
+
+// Object operations
+let user = { name: "Alice", age: 30 }; // → {name: "Alice", age: 30}
+user.name.toUpperCase();               // → "ALICE"
 ```
 
-### Evaluation Modes
-- **Live Mode**: Results appear as you type (with debounce)
-- **Manual Mode**: Evaluate with `Ctrl+Shift+E`
-- **Selection Mode**: Evaluate only selected expressions
-
 ### Commands
-- `JS Evaluator: Start Live Evaluation` - Enable inline evaluation
-- `JS Evaluator: Stop Live Evaluation` - Disable inline evaluation  
-- `JS Evaluator: Evaluate Selection` - Run selected code
-- `JS Evaluator: Clear All Results` - Remove all inline results
-- `JS Evaluator: Toggle Output Channel` - Show/hide console output
 
-## Development
+| Command | Shortcut | Description |
+|---------|----------|-------------|
+| **Koda.js: Start Live Evaluation** | `Ctrl+Shift+K` | Enable real-time code evaluation |
+| **Koda.js: Stop Live Evaluation** | - | Disable live evaluation |
+| **Koda.js: Evaluate Selection** | - | Evaluate only selected code |
+| **Koda.js: Clear All Results** | - | Remove all inline results |
+
+### Settings
+
+Configure Koda.js through VS Code settings:
+
+```json
+{
+  "jsEvaluator.liveEvaluation.enabled": true,
+  "jsEvaluator.evaluationDelay": 500,
+  "jsEvaluator.maxResultLength": 100,
+  "jsEvaluator.showInlineResults": true,
+  "jsEvaluator.showHoverDetails": true,
+  "jsEvaluator.executionTimeout": 3000
+}
+```
+
+## 🛠️ Development
 
 ### Prerequisites
 - Node.js 16+
@@ -73,60 +79,62 @@ numbers.map(x => x * 2);     // → [2, 4, 6]
 
 ### Setup
 ```bash
-git clone <repository-url>
-cd vscode-js-console
+git clone https://github.com/asp2131/codeecho.git
+cd codeecho
 npm install
+npm run compile
 ```
 
-### Available Scripts
+### Scripts
 ```bash
-npm run compile       # Compile TypeScript
-npm run watch        # Watch for changes
-npm run test         # Run tests
-npm run package      # Package extension
-npm run publish      # Publish to marketplace
+npm run compile     # Compile TypeScript
+npm run watch      # Watch for changes
+npm run package    # Package extension  
+npm run publish    # Publish to marketplace
 ```
 
-### Project Structure
+### Architecture
 ```
-├── src/
-│   ├── extension.ts         # Main extension entry point
-│   ├── evaluator/           # Code evaluation engine
-│   ├── decorations/         # Inline result decorations
-│   ├── parser/              # AST parsing and analysis
-│   └── utils/               # Utility functions
-├── media/               # Icons and assets
-├── test/               # Test files
-└── package.json        # Extension manifest
+src/
+├── extension.ts           # Main extension entry
+├── evaluator/
+│   ├── engine.ts         # Safe evaluation engine
+│   └── parser.ts         # AST parsing & analysis
+├── decorations/
+│   └── resultDecorator.ts # Inline result display
+└── utils/                # Utility functions
 ```
 
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## License
+## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-## Support
+## 🐛 Support
 
-- **Issues**: [GitHub Issues](https://github.com/username/vscode-js-console/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/username/vscode-js-console/discussions)
-- **Documentation**: [Wiki](https://github.com/username/vscode-js-console/wiki)
+- **Issues**: [GitHub Issues](https://github.com/asp2131/codeecho/issues)
+- **Repository**: [GitHub](https://github.com/asp2131/codeecho)
 
-## Roadmap
+## 🗺️ Roadmap
 
-- [ ] Inline JavaScript evaluation
-- [ ] Live result display as you type
-- [ ] Expression evaluation on selection
-- [ ] Error highlighting and tooltips
-- [ ] Variable value inspection
-- [ ] Performance optimization for large files
-- [ ] Custom evaluation contexts
-- [ ] Workspace-specific settings
+- [x] Real-time JavaScript evaluation
+- [x] Inline result display
+- [x] Error highlighting and diagnostics
+- [x] Expression parsing and evaluation
+- [x] Safe execution environment
 - [ ] TypeScript support
-- [ ] Integration with existing debugging tools
+- [ ] Multi-file evaluation
+- [ ] Custom evaluation contexts
+- [ ] Performance optimizations
+- [ ] Advanced debugging features
+
+---
+
+**Koda.js** - Making JavaScript development faster and more interactive! ⚡
