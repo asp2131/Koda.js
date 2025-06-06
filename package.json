@@ -1,8 +1,8 @@
 {
   "name": "vscode-js-evaluator",
-  "displayName": "JavaScript Evaluator",
+  "displayName": "Koda.js",
   "description": "Inline JavaScript evaluation similar to Quokka.js",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "akintundepounds",
   "engines": {
     "vscode": "^1.74.0"
@@ -25,23 +25,23 @@
     "commands": [
       {
         "command": "jsEvaluator.startLiveEvaluation",
-        "title": "JS Evaluator: Start Live Evaluation",
-        "category": "JSEvaluator"
+        "title": "Koda.js: Start Live Evaluation",
+        "category": "Koda.js"
       },
       {
         "command": "jsEvaluator.stopLiveEvaluation",
-        "title": "JS Evaluator: Stop Live Evaluation",
-        "category": "JSEvaluator"
+        "title": "Koda.js: Stop Live Evaluation",
+        "category": "Koda.js"
       },
       {
         "command": "jsEvaluator.evaluateSelection",
-        "title": "JS Evaluator: Evaluate Selection",
-        "category": "JSEvaluator"
+        "title": "Koda.js: Evaluate Selection",
+        "category": "Koda.js"
       },
       {
         "command": "jsEvaluator.clearAllResults",
-        "title": "JS Evaluator: Clear All Results",
-        "category": "JSEvaluator"
+        "title": "Koda.js: Clear All Results",
+        "category": "Koda.js"
       }
     ],
     "keybindings": [
@@ -53,7 +53,7 @@
       }
     ],
     "configuration": {
-      "title": "JavaScript Evaluator",
+      "title": "Koda.js",
       "properties": {
         "jsEvaluator.liveEvaluation.enabled": {
           "type": "boolean",
