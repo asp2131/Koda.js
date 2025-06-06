@@ -4,6 +4,7 @@
   "description": "Inline JavaScript evaluation similar to Quokka.js",
   "version": "0.0.5",
   "publisher": "akintundepounds",
+  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.74.0"
   },
