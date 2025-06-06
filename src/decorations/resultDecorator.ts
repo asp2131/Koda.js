@@ -14,10 +14,10 @@ export class ResultDecorator {
 
   constructor() {
     // Define the style for our inline result display
-    // We'll make it look like a comment, and style it further later
+    // Blue color similar to Quokka's evaluation results
     this.decorationType = vscode.window.createTextEditorDecorationType({
       after: {
-        color: new vscode.ThemeColor('editorCodeLens.foreground'), // A subdued color, like comments or CodeLens
+        color: '#4A90E2', // Blue color similar to Quokka
         fontStyle: 'italic',
         margin: '0 0 0 1em', // Add some space before the decoration
       },
@@ -77,21 +77,30 @@ export class ResultDecorator {
   }
 
   public displaySyntaxErrors(editor: vscode.TextEditor, diagnostics: vscode.Diagnostic[]) {
-    const syntaxErrorDecorations: vscode.DecorationOptions[] = diagnostics.map(diagnostic => {
+    console.log(`[ResultDecorator] displaySyntaxErrors called with ${diagnostics.length} diagnostics`);
+    
+    const syntaxErrorDecorations: vscode.DecorationOptions[] = diagnostics.map((diagnostic, index) => {
       const errorText = diagnostic.message.length > 50 
         ? diagnostic.message.substring(0, 50) + '...' 
         : diagnostic.message;
+
+      console.log(`[ResultDecorator] Diagnostic ${index}: range=${diagnostic.range.start.line}:${diagnostic.range.start.character}-${diagnostic.range.end.line}:${diagnostic.range.end.character}, message="${errorText}"`);
+
+      // Add line information to the error message for better context
+      const lineInfo = `Line ${diagnostic.range.start.line + 1}: `;
+      const fullErrorText = lineInfo + errorText;
 
       return {
         range: diagnostic.range,
         renderOptions: {
           after: {
-            contentText: ` // Syntax Error: ${errorText}`,
+            contentText: ` // Syntax Error: ${fullErrorText}`,
           },
         },
       };
     });
 
+    console.log(`[ResultDecorator] Applying ${syntaxErrorDecorations.length} syntax error decorations`);
     editor.setDecorations(this.errorDecorationType, syntaxErrorDecorations);
   }
 
