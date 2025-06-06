@@ -3,9 +3,13 @@
   "displayName": "JavaScript Evaluator",
   "description": "Inline JavaScript evaluation similar to Quokka.js",
   "version": "0.0.1",
-  "publisher": "your-publisher-name",
+  "publisher": "AkintundePounds",
   "engines": {
     "vscode": "^1.74.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/asp2131/codeecho.git"
   },
   "categories": [
     "Programming Languages",
