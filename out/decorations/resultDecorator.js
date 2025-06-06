@@ -37,36 +37,73 @@ class ResultDecorator {
             },
             // We can add more styles for errors, logs, etc. later by creating more decoration types
         });
+        // Define a more prominent style for syntax errors
+        this.errorDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                color: new vscode.ThemeColor('errorForeground'),
+                fontStyle: 'italic',
+                margin: '0 0 0 1em',
+                fontWeight: 'bold',
+            },
+            backgroundColor: new vscode.ThemeColor('errorBackground'),
+            border: '1px solid',
+            borderColor: new vscode.ThemeColor('errorBorder'),
+        });
     }
     displayResults(editor, results) {
         console.log('[ResultDecorator] displayResults called. Number of results:', results.length);
         console.log('[ResultDecorator] Results data:', JSON.stringify(results, null, 2)); // Log the actual data
-        const decorations = results.map(result => {
+        const regularDecorations = [];
+        const errorDecorations = [];
+        results.forEach(result => {
             const decorationRange = result.originalRange; // Anchor to the expression itself
             const prefix = result.isError ? 'Error: ' : result.isLog ? 'log: ' : '=> ';
             // Ensure textContent is a string and handle undefined results
             const textValue = result.text === undefined ? 'undefined' : result.text;
             const textContentString = String(textValue).replace(/\n/g, '\\n'); // Escape newlines
-            return {
+            const decorationOption = {
                 range: decorationRange,
                 renderOptions: {
                     after: {
                         contentText: ` // ${prefix}${textContentString}`,
-                        margin: '0 0 0 1em',
-                        color: new vscode.ThemeColor('editorCodeLens.foreground'),
-                        fontStyle: 'italic',
+                    },
+                },
+            };
+            if (result.isError) {
+                errorDecorations.push(decorationOption);
+            }
+            else {
+                regularDecorations.push(decorationOption);
+            }
+        });
+        console.log('[ResultDecorator] Applying regular decorations:', regularDecorations.length);
+        console.log('[ResultDecorator] Applying error decorations:', errorDecorations.length);
+        editor.setDecorations(this.decorationType, regularDecorations);
+        editor.setDecorations(this.errorDecorationType, errorDecorations);
+    }
+    displaySyntaxErrors(editor, diagnostics) {
+        const syntaxErrorDecorations = diagnostics.map(diagnostic => {
+            const errorText = diagnostic.message.length > 50
+                ? diagnostic.message.substring(0, 50) + '...'
+                : diagnostic.message;
+            return {
+                range: diagnostic.range,
+                renderOptions: {
+                    after: {
+                        contentText: ` // Syntax Error: ${errorText}`,
                     },
                 },
             };
         });
-        console.log('[ResultDecorator] Applying decorations:', JSON.stringify(decorations, null, 2));
-        editor.setDecorations(this.decorationType, decorations);
+        editor.setDecorations(this.errorDecorationType, syntaxErrorDecorations);
     }
     clearDecorations(editor) {
         editor.setDecorations(this.decorationType, []);
+        editor.setDecorations(this.errorDecorationType, []);
     }
     dispose() {
         this.decorationType.dispose();
+        this.errorDecorationType.dispose();
     }
 }
 exports.ResultDecorator = ResultDecorator;

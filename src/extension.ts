@@ -40,10 +40,22 @@ async function evaluateEditor(
     const syntaxDiagnosticsFromParser: vscode.Diagnostic[] = parseOutput.diagnostics;
 
     if (syntaxDiagnosticsFromParser.length > 0) {
-        currentDiagnostics.set(document.uri, syntaxDiagnosticsFromParser);
+        // Ensure diagnostics are set with the correct source and severity
+        const enhancedDiagnostics = syntaxDiagnosticsFromParser.map(diagnostic => ({
+            ...diagnostic,
+            source: 'JavaScript Evaluator',
+            severity: vscode.DiagnosticSeverity.Error
+        }));
+        
+        currentDiagnostics.set(document.uri, enhancedDiagnostics);
+        
+        // Display syntax errors as inline decorations for better visibility
+        resultDecorator.displaySyntaxErrors(editor, enhancedDiagnostics);
+        
         if (!isLiveEvaluationActive) {
-            vscode.window.showErrorMessage('Syntax errors found. See Problems panel.');
+            vscode.window.showErrorMessage('Syntax errors found. See Problems panel and inline decorations.');
         }
+        return;
     }
 
     if (expressions.length === 0) {
