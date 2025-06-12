@@ -10,6 +10,7 @@ A powerful VS Code extension for real-time JavaScript evaluation and inline code
 
 - **Live Evaluation**: See JavaScript results instantly as you type
 - **Inline Results**: Code outputs appear right next to your expressions
+- **Time Travel Debugging**: Step through execution history and inspect variable changes
 - **Error Highlighting**: Syntax and runtime errors highlighted with clear diagnostics
 - **Smart Parsing**: Advanced AST-based parsing for accurate code analysis
 - **Zero Setup**: Works out of the box with no configuration required
@@ -50,6 +51,41 @@ let user = { name: "Alice", age: 30 }; // → {name: "Alice", age: 30}
 user.name.toUpperCase();               // → "ALICE"
 ```
 
+### Time Travel Debugging
+
+Koda.js includes powerful time travel debugging capabilities that let you step through your code's execution history and inspect how variables change over time.
+
+#### Using Time Travel Debugger
+
+1. **Enable Time Travel**: Use the command `Koda.js: Toggle Time Travel` or press the toggle button in the Time Travel panel
+2. **Open Time Travel Panel**: The panel automatically opens when time travel is enabled
+3. **Execute Code**: Run your JavaScript code normally - each expression execution is recorded
+4. **Navigate History**: Use the navigation controls to step through execution history
+
+#### Navigation Controls
+
+- **Step Back** (⬅): Go to the previous execution step
+- **Step Forward** (➡): Go to the next execution step  
+- **Timeline**: Click any step in the timeline to jump directly to that point
+- **Clear History**: Remove all recorded execution steps
+
+#### Features
+
+- **Variable Tracking**: See how variables change at each execution step
+- **Expression Highlighting**: The corresponding code is highlighted when navigating steps
+- **Error Inspection**: Review errors that occurred during execution
+- **Timeline View**: Visual timeline of all execution steps with timestamps
+
+```javascript
+// Example: Time travel debugging in action
+let count = 0;                    // Step 1: count = 0
+count++;                         // Step 2: count = 1  
+count *= 2;                      // Step 3: count = 2
+let result = count + 10;         // Step 4: result = 12, count = 2
+
+// Navigate back through steps to see how variables evolved
+```
+
 ### Commands
 
 | Command | Shortcut | Description |
@@ -58,6 +94,8 @@ user.name.toUpperCase();               // → "ALICE"
 | **Koda.js: Stop Live Evaluation** | - | Disable live evaluation |
 | **Koda.js: Evaluate Selection** | - | Evaluate only selected code |
 | **Koda.js: Clear All Results** | - | Remove all inline results |
+| **Koda.js: Toggle Time Travel** | - | Enable/disable time travel debugging |
+| **Koda.js: Open Time Travel Panel** | - | Show the time travel debugging panel |
 
 ### Settings
 
@@ -133,6 +171,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - [x] Error highlighting and diagnostics
 - [x] Expression parsing and evaluation
 - [x] Safe execution environment
+- [x] Time travel debugging with execution history
 - [ ] TypeScript support
 - [ ] Multi-file evaluation
 - [ ] Custom evaluation contexts
