@@ -42,9 +42,11 @@ class TimeTravelPanel {
         // Highlights the source line of the current step in the editor.
         this._lineHighlight = vscode.window.createTextEditorDecorationType({
             isWholeLine: true,
-            backgroundColor: new vscode.ThemeColor('editor.selectionHighlightBackground'),
+            backgroundColor: 'rgba(120, 170, 255, 0.12)',
             border: '1px solid',
             borderColor: new vscode.ThemeColor('focusBorder'),
+            overviewRulerColor: new vscode.ThemeColor('focusBorder'),
+            overviewRulerLane: vscode.OverviewRulerLane.Full,
         });
         this._panel = panel;
         this.timeTravelDebugger = timeTravelDebugger;
@@ -92,8 +94,21 @@ class TimeTravelPanel {
             this._highlightStep(step, true);
         }
     }
+    /**
+     * The editor to decorate. When a webview button is clicked the panel takes
+     * focus, so `activeTextEditor` is undefined — fall back to the first visible
+     * JS/TS editor.
+     */
+    _targetEditor() {
+        const isCode = (e) => e.document.languageId === 'javascript' || e.document.languageId === 'typescript';
+        const active = vscode.window.activeTextEditor;
+        if (active && isCode(active)) {
+            return active;
+        }
+        return vscode.window.visibleTextEditors.find(isCode);
+    }
     _highlightStep(step, reveal) {
-        const editor = vscode.window.activeTextEditor;
+        const editor = this._targetEditor();
         if (!editor || step.line < 1 || step.line > editor.document.lineCount) {
             return;
         }
@@ -105,7 +120,7 @@ class TimeTravelPanel {
         }
     }
     _clearHighlight() {
-        vscode.window.activeTextEditor?.setDecorations(this._lineHighlight, []);
+        this._targetEditor()?.setDecorations(this._lineHighlight, []);
     }
     update() {
         this._update();
