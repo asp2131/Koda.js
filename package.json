@@ -2,7 +2,7 @@
   "name": "vscode-js-evaluator",
   "displayName": "Koda.js",
   "description": "Inline JavaScript evaluation similar to Quokka.js",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "akintundepounds",
   "icon": "images/icon.png",
   "engines": {
@@ -142,6 +142,6 @@
     "@vscode/test-electron": "^2.3.0"
   },
   "dependencies": {
-    "acorn": "^8.8.0" 
+    "acorn": "^8.8.0"
   }
 }
