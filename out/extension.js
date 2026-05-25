@@ -68,9 +68,20 @@ function recordsToDisplay(records, document) {
         const lineIdx = line - 1;
         const range = new vscode.Range(lineIdx, 0, lineIdx, document.lineAt(lineIdx).text.length);
         const last = recs[recs.length - 1];
-        const badge = recs.length > 1 ? ` (×${recs.length})` : '';
+        // Multiple records on one line = a loop. Show the value sequence
+        // (0 → 1 → 4) instead of a count, capped so long loops don't overflow.
+        const MAX_SEQ = 8;
+        let text;
+        if (recs.length === 1) {
+            text = last.short;
+        }
+        else {
+            const values = recs.map(r => r.short);
+            const shown = values.slice(0, MAX_SEQ).join(' → ');
+            text = values.length > MAX_SEQ ? `${shown} → … (${values.length})` : shown;
+        }
         out.push({
-            text: last.short + badge,
+            text,
             fullText: recs.map(r => r.full).join('\n'),
             originalRange: range,
             isLog: last.kind === 'log',
@@ -125,6 +136,14 @@ async function evaluateEditor(editor, parser, evaluator, resultDecorator, curren
         return;
     }
     const displayableResults = recordsToDisplay(runResult.records, document);
+    // Feed the execution timeline to the time-travel debugger (records are in
+    // execution order) and refresh the panel if it's open.
+    if (isTimeTravelEnabled) {
+        evaluator.getTimeTravelDebugger().load(runResult.records, document);
+        if (timeTravelPanel_1.TimeTravelPanel.currentPanel) {
+            timeTravelPanel_1.TimeTravelPanel.currentPanel.update();
+        }
+    }
     if (runResult.timedOut && isLiveEvaluationActive) {
         liveEvaluationStatusBarItem.text = '$(warning) JS Live (timed out)';
     }

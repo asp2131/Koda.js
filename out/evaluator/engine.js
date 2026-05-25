@@ -127,11 +127,6 @@ class SafeEvaluator {
             // Clean up the temporary range property
             delete context.__currentExpressionRange;
         }
-        // Record execution step for time travel debugging if enabled
-        if (this.isTimeTravelEnabled) {
-            console.log('[TimeTravelDebugger] Recording step for:', expressionText);
-            this.timeTravelDebugger.recordStep(expressionText, expressionRange, result, context, error);
-        }
         return error ? { error } : { result };
     }
 }

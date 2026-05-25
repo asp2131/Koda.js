@@ -1,6 +1,6 @@
 import * as vm from 'vm';
 import * as vscode from 'vscode';
-import { TimeTravelDebugger, ExecutionStep } from './timeTravel';
+import { TimeTravelDebugger } from './timeTravel';
 
 /**
  * Safely evaluates JavaScript expressions in a sandboxed environment with time travel debugging support.
@@ -112,18 +112,6 @@ export class SafeEvaluator {
     } finally {
       // Clean up the temporary range property
       delete (context as any).__currentExpressionRange;
-    }
-
-    // Record execution step for time travel debugging if enabled
-    if (this.isTimeTravelEnabled) {
-      console.log('[TimeTravelDebugger] Recording step for:', expressionText);
-      this.timeTravelDebugger.recordStep(
-        expressionText,
-        expressionRange,
-        result,
-        context,
-        error
-      );
     }
 
     return error ? { error } : { result };
