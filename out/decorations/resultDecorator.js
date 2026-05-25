@@ -77,10 +77,10 @@ class ResultDecorator {
                 margin: '0 0 0 1em',
             },
         });
-        // Log messages - Cyan
+        // Log messages - Orange (distinguishes logs from expression values)
         this.logDecorationType = vscode.window.createTextEditorDecorationType({
             after: {
-                color: '#56B6C2',
+                color: '#D19A66',
                 fontStyle: 'italic',
                 margin: '0 0 0 1em',
             },
@@ -137,7 +137,9 @@ class ResultDecorator {
             const cacheKey = `${editor.document.uri.toString()}_${decorationRange.start.line}_${decorationRange.start.character}`;
             // Cache the full result for hover
             this.resultCache.set(cacheKey, result);
-            const prefix = result.isError ? 'Error: ' : result.isLog ? 'log: ' : '=> ';
+            // Logs and expression values render identically (just the value); only
+            // errors keep a prefix. Log lines are distinguished by color instead.
+            const prefix = result.isError ? 'Error: ' : '';
             // Truncate the display text
             const truncatedText = this.truncateValue(result.text);
             const textContentString = truncatedText.replace(/\n/g, '\\n'); // Escape newlines
