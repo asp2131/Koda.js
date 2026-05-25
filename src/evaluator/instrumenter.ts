@@ -83,13 +83,9 @@ export function instrument(code: string): string {
           wrap(node.expression, line);
         }
         break;
-      case 'VariableDeclaration':
-        for (const decl of node.declarations) {
-          if (decl.init && !isConsoleCall(decl.init)) {
-            wrap(decl.init, line);
-          }
-        }
-        break;
+      // Variable/function declarations are NOT captured (no inline value) to
+      // match Quokka — only expression statements and returns display a value.
+      // The declaration still executes; we just don't wrap its initializer.
       case 'ReturnStatement':
         if (node.argument && !isConsoleCall(node.argument)) {
           wrap(node.argument, line);

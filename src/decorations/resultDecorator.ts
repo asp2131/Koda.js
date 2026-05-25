@@ -159,7 +159,7 @@ export class ResultDecorator {
         range: decorationRange,
         renderOptions: {
           after: {
-            contentText: ` // ${prefix}${textContentString}`,
+            contentText: `${prefix}${textContentString}`,
           },
         },
         // Store the cache key in the decoration for hover lookup
