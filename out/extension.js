@@ -25,9 +25,9 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode = __importStar(require("vscode"));
-const util = __importStar(require("util"));
 const parser_1 = require("./evaluator/parser");
 const engine_1 = require("./evaluator/engine");
+const liveRunner_1 = require("./evaluator/liveRunner");
 const resultDecorator_1 = require("./decorations/resultDecorator");
 const timeTravelPanel_1 = require("./ui/timeTravelPanel");
 const hoverProvider_1 = require("./providers/hoverProvider");
@@ -42,6 +42,44 @@ let diagnostics;
 // Time travel debugging state
 let isTimeTravelEnabled = false;
 let timeTravelStatusBarItem;
+// Single shared runner: instruments + executes the whole file once per evaluation.
+const liveRunner = new liveRunner_1.LiveRunner();
+/**
+ * Collapse captured records by source line (Quokka-style): keep every value for a
+ * line, show the latest inline with a ×N badge for repeats (loops), and place all
+ * values in the hover text.
+ */
+function recordsToDisplay(records, document) {
+    const byLine = new Map();
+    for (const r of records) {
+        if (r.line < 1 || r.line > document.lineCount) {
+            continue;
+        }
+        const list = byLine.get(r.line);
+        if (list) {
+            list.push(r);
+        }
+        else {
+            byLine.set(r.line, [r]);
+        }
+    }
+    const out = [];
+    for (const [line, recs] of byLine) {
+        const lineIdx = line - 1;
+        const range = new vscode.Range(lineIdx, 0, lineIdx, document.lineAt(lineIdx).text.length);
+        const last = recs[recs.length - 1];
+        const badge = recs.length > 1 ? ` (×${recs.length})` : '';
+        out.push({
+            text: last.short + badge,
+            fullText: recs.map(r => r.full).join('\n'),
+            originalRange: range,
+            isLog: last.kind === 'log',
+            isError: last.kind === 'error',
+            valueType: last.valueType
+        });
+    }
+    return out;
+}
 async function evaluateEditor(editor, parser, evaluator, resultDecorator, currentDiagnostics, valueExplorerProvider) {
     if (!editor) {
         return;
@@ -55,196 +93,43 @@ async function evaluateEditor(editor, parser, evaluator, resultDecorator, curren
     resultDecorator.clearDecorations(editor);
     currentDiagnostics.clear();
     const document = editor.document;
+    // Parse only for syntax diagnostics; execution is handled by the runner.
     const parseOutput = parser.parseDocument(document);
-    const expressions = parseOutput.expressions;
-    const liveComments = parseOutput.liveComments;
     const syntaxDiagnosticsFromParser = parseOutput.diagnostics;
     if (syntaxDiagnosticsFromParser.length > 0) {
-        // Ensure diagnostics are set with the correct source and severity
         const enhancedDiagnostics = syntaxDiagnosticsFromParser.map(diagnostic => ({
             ...diagnostic,
             source: 'JavaScript Evaluator',
             severity: vscode.DiagnosticSeverity.Error
         }));
         currentDiagnostics.set(document.uri, enhancedDiagnostics);
-        // Display syntax errors as inline decorations for better visibility
         resultDecorator.displaySyntaxErrors(editor, enhancedDiagnostics);
         if (!isLiveEvaluationActive) {
             vscode.window.showErrorMessage('Syntax errors found. See Problems panel and inline decorations.');
         }
         return;
     }
-    if (expressions.length === 0) {
-        if (!isLiveEvaluationActive && syntaxDiagnosticsFromParser.length === 0) {
-            vscode.window.showInformationMessage('No JavaScript expressions found to evaluate.');
-        }
+    // Single-pass execution: instrument the whole file and run it once in a real
+    // Node child process. Captures values, console output, and async results.
+    const config = vscode.workspace.getConfiguration('jsEvaluator');
+    let runResult;
+    try {
+        runResult = await liveRunner.run(document.getText(), {
+            cwd: vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath,
+            timeoutMs: config.get('executionTimeout', 3000)
+        });
+    }
+    catch (e) {
+        // Instrumentation failure that slipped past the parser diagnostics.
+        console.error('[evaluateEditor] Run failed:', e);
         return;
     }
-    const displayableResults = [];
-    const evaluationContext = evaluator.createContext((logMessage, expressionRange) => {
-        if (expressionRange) {
-            displayableResults.push({
-                text: logMessage,
-                fullText: logMessage,
-                originalRange: expressionRange,
-                isLog: true,
-                valueType: 'string'
-            });
-        }
-        else {
-            console.log(`[Sandbox Log - Unassociated in evaluateEditor]: ${logMessage}`);
-        }
-    });
-    for (const expr of expressions) { // Using for...of for cleaner iteration
-        try {
-            evaluationContext.__currentExpressionRange = expr.range;
-            // Corrected argument order and variable name for evaluation output
-            const evaluationOutput = evaluator.evaluate(expr.text, expr.range, evaluationContext);
-            delete evaluationContext.__currentExpressionRange;
-            if (evaluationOutput.error) {
-                displayableResults.push({
-                    text: evaluationOutput.error,
-                    fullText: evaluationOutput.error,
-                    originalRange: expr.range,
-                    isError: true,
-                    valueType: 'error'
-                });
-            }
-            else {
-                let isConsoleLogCall = false;
-                const node = expr.node; // node is acorn.Node
-                if (node.type === 'ExpressionStatement') {
-                    // Type assertion for ExpressionStatement
-                    const expressionStatement = node;
-                    if (expressionStatement.expression.type === 'CallExpression') {
-                        // Type assertion for CallExpression
-                        const callExpression = expressionStatement.expression;
-                        if (callExpression.callee.type === 'MemberExpression') {
-                            // Type assertion for MemberExpression
-                            const memberExpression = callExpression.callee;
-                            if (memberExpression.object.type === 'Identifier') {
-                                // Type assertion for Identifier
-                                const identifier = memberExpression.object;
-                                if (identifier.name === 'console') {
-                                    isConsoleLogCall = true;
-                                }
-                            }
-                        }
-                    }
-                }
-                if (evaluationOutput.result !== undefined && !isConsoleLogCall) {
-                    const result = evaluationOutput.result;
-                    let resultText;
-                    let fullResultText;
-                    let valueType;
-                    if (typeof result === 'object' && result !== null) {
-                        // Use util.inspect for proper object formatting
-                        fullResultText = util.inspect(result, {
-                            depth: null,
-                            maxArrayLength: null,
-                            breakLength: Infinity,
-                            compact: false
-                        });
-                        resultText = util.inspect(result, {
-                            depth: 2,
-                            maxArrayLength: 10,
-                            maxStringLength: 100,
-                            breakLength: Infinity,
-                            compact: true
-                        });
-                        valueType = Array.isArray(result) ? 'array' : 'object';
-                    }
-                    else {
-                        fullResultText = String(result);
-                        resultText = String(result);
-                        valueType = typeof result;
-                    }
-                    displayableResults.push({
-                        text: resultText,
-                        fullText: fullResultText,
-                        originalRange: expr.range,
-                        valueType: valueType
-                    });
-                }
-            }
-        }
-        catch (e) {
-            console.error(`[evaluateEditor] Error evaluating expression '${expr.text}':`, e);
-            delete evaluationContext.__currentExpressionRange; // Ensure cleanup on error too
-            const errorMessage = e.message || 'Unknown evaluation error';
-            displayableResults.push({
-                text: errorMessage,
-                fullText: errorMessage,
-                originalRange: expr.range,
-                isError: true,
-                valueType: 'error'
-            });
-        }
+    const displayableResults = recordsToDisplay(runResult.records, document);
+    if (runResult.timedOut && isLiveEvaluationActive) {
+        liveEvaluationStatusBarItem.text = '$(warning) JS Live (timed out)';
     }
-    // Evaluate live comments
-    for (const liveComment of liveComments) {
-        try {
-            const startTime = Date.now();
-            const evaluationOutput = evaluator.evaluate(liveComment.expressionText, liveComment.expressionRange, evaluationContext);
-            const endTime = Date.now();
-            if (evaluationOutput.error) {
-                displayableResults.push({
-                    text: `Comment Error: ${evaluationOutput.error}`,
-                    fullText: evaluationOutput.error,
-                    originalRange: liveComment.commentRange,
-                    isError: true,
-                    valueType: 'error'
-                });
-            }
-            else {
-                let resultText;
-                let fullResultText;
-                let valueType;
-                if (typeof evaluationOutput.result === 'object' && evaluationOutput.result !== null) {
-                    fullResultText = util.inspect(evaluationOutput.result, {
-                        depth: null,
-                        maxArrayLength: null,
-                        breakLength: Infinity,
-                        compact: false
-                    });
-                    resultText = util.inspect(evaluationOutput.result, {
-                        depth: 2,
-                        maxArrayLength: 10,
-                        maxStringLength: 100,
-                        breakLength: Infinity,
-                        compact: true
-                    });
-                    valueType = Array.isArray(evaluationOutput.result) ? 'array' : 'object';
-                }
-                else {
-                    fullResultText = String(evaluationOutput.result);
-                    resultText = String(evaluationOutput.result);
-                    valueType = typeof evaluationOutput.result;
-                }
-                // If timing is requested, add it to the display
-                if (liveComment.timing) {
-                    const executionTime = endTime - startTime;
-                    resultText = `${resultText} (${executionTime}ms)`;
-                    fullResultText = `${fullResultText}\n\nExecution time: ${executionTime}ms`;
-                }
-                displayableResults.push({
-                    text: resultText,
-                    fullText: fullResultText,
-                    originalRange: liveComment.commentRange,
-                    valueType: valueType
-                });
-            }
-        }
-        catch (e) {
-            console.error(`[evaluateEditor] Error evaluating live comment '${liveComment.expressionText}':`, e);
-            displayableResults.push({
-                text: e.message || 'Unknown evaluation error',
-                fullText: e.message || 'Unknown evaluation error',
-                originalRange: liveComment.commentRange,
-                isError: true,
-                valueType: 'error'
-            });
-        }
+    else if (isLiveEvaluationActive) {
+        liveEvaluationStatusBarItem.text = '$(zap) JS Live';
     }
     if (displayableResults.length > 0) {
         displayableResults.sort((a, b) => a.originalRange.start.line - b.originalRange.start.line);
