@@ -58,8 +58,22 @@
         "command": "jsEvaluator.clearTimeTravelHistory",
         "title": "Koda.js: Clear Time Travel History",
         "category": "Koda.js"
+      },
+      {
+        "command": "jsEvaluator.copyValueFromExplorer",
+        "title": "Koda.js: Copy Value",
+        "category": "Koda.js"
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "kodaValueExplorer",
+          "name": "Koda Value Explorer",
+          "when": "kodaLiveEvaluationActive"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "jsEvaluator.startLiveEvaluation",

@@ -25,10 +25,28 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SafeEvaluator = void 0;
 const vm = __importStar(require("vm"));
+const timeTravel_1 = require("./timeTravel");
 /**
- * Safely evaluates JavaScript expressions in a sandboxed environment.
+ * Safely evaluates JavaScript expressions in a sandboxed environment with time travel debugging support.
  */
 class SafeEvaluator {
+    constructor() {
+        this.isTimeTravelEnabled = false;
+        this.timeTravelDebugger = new timeTravel_1.TimeTravelDebugger();
+    }
+    // Time travel control methods
+    enableTimeTravel() {
+        this.isTimeTravelEnabled = true;
+    }
+    disableTimeTravel() {
+        this.isTimeTravelEnabled = false;
+    }
+    getTimeTravelDebugger() {
+        return this.timeTravelDebugger;
+    }
+    clearTimeTravelHistory() {
+        this.timeTravelDebugger.clearHistory();
+    }
     createContext(logOutput) {
         // Create a basic context with a custom console.log if a logger is provided
         const sandbox = {
@@ -79,22 +97,42 @@ class SafeEvaluator {
      */
     evaluate(expressionText, expressionRange, context) {
         // Store the current expression's range on the context so the sandbox logger can access it
-        // This is a bit of a hack; a cleaner way might involve a custom VM or more intricate context management.
         context.__currentExpressionRange = expressionRange;
+        let result;
+        let error;
         try {
             const script = new vm.Script(expressionText);
-            const result = script.runInContext(context, { timeout: 1000 }); // 1 second timeout
-            // For expressions, the result is directly returned. 
-            // For statements like assignments (let a = 10), it's undefined.
-            return { result };
+            result = script.runInContext(context, { timeout: 1000 }); // 1 second timeout
         }
         catch (e) {
-            return { error: e.message || String(e) };
+            // Format error with stack trace information
+            let errorMessage = e.message || String(e);
+            // If there's a stack trace, include it in the error
+            if (e.stack) {
+                // Clean up the stack trace to make it more readable
+                const stackLines = e.stack.split('\n');
+                // Filter out internal VM frames and keep only relevant lines
+                const relevantStack = stackLines.filter((line) => {
+                    return !line.includes('at Script.runInContext') &&
+                        !line.includes('at createScript') &&
+                        !line.includes('at Object.runInContext');
+                });
+                if (relevantStack.length > 1) {
+                    errorMessage = `${errorMessage}\n\nStack trace:\n${relevantStack.slice(1).join('\n')}`;
+                }
+            }
+            error = errorMessage;
         }
         finally {
-            // It's important to clean up any properties we set on the context if they are temporary
+            // Clean up the temporary range property
             delete context.__currentExpressionRange;
         }
+        // Record execution step for time travel debugging if enabled
+        if (this.isTimeTravelEnabled) {
+            console.log('[TimeTravelDebugger] Recording step for:', expressionText);
+            this.timeTravelDebugger.recordStep(expressionText, expressionRange, result, context, error);
+        }
+        return error ? { error } : { result };
     }
 }
 exports.SafeEvaluator = SafeEvaluator;

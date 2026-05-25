@@ -89,7 +89,26 @@ export class SafeEvaluator {
       const script = new vm.Script(expressionText);
       result = script.runInContext(context, { timeout: 1000 }); // 1 second timeout
     } catch (e: any) {
-      error = e.message || String(e);
+      // Format error with stack trace information
+      let errorMessage = e.message || String(e);
+      
+      // If there's a stack trace, include it in the error
+      if (e.stack) {
+        // Clean up the stack trace to make it more readable
+        const stackLines = e.stack.split('\n');
+        // Filter out internal VM frames and keep only relevant lines
+        const relevantStack = stackLines.filter((line: string) => {
+          return !line.includes('at Script.runInContext') &&
+                 !line.includes('at createScript') &&
+                 !line.includes('at Object.runInContext');
+        });
+        
+        if (relevantStack.length > 1) {
+          errorMessage = `${errorMessage}\n\nStack trace:\n${relevantStack.slice(1).join('\n')}`;
+        }
+      }
+      
+      error = errorMessage;
     } finally {
       // Clean up the temporary range property
       delete (context as any).__currentExpressionRange;

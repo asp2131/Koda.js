@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 import * as acorn from 'acorn'; // Import acorn for type assertions
+import * as util from 'util';
 import { ExpressionParser, ExpressionInfo, ParseResult } from './evaluator/parser';
 import { SafeEvaluator } from './evaluator/engine';
 import { ResultDecorator, EvaluationResultDisplay } from './decorations/resultDecorator';
 import { TimeTravelPanel } from './ui/timeTravelPanel';
+import { EvaluationHoverProvider } from './providers/hoverProvider';
+import { ValueExplorerProvider } from './providers/valueExplorerProvider';
 
 // Global state for live evaluation
 let isLiveEvaluationActive: boolean = false;
@@ -23,7 +26,8 @@ async function evaluateEditor(
     parser: ExpressionParser,
     evaluator: SafeEvaluator,
     resultDecorator: ResultDecorator,
-    currentDiagnostics: vscode.DiagnosticCollection
+    currentDiagnostics: vscode.DiagnosticCollection,
+    valueExplorerProvider?: ValueExplorerProvider
 ) {
     if (!editor) {
         return;
@@ -40,8 +44,9 @@ async function evaluateEditor(
     currentDiagnostics.clear();
 
     const document = editor.document;
-    const parseOutput: ParseResult = parser.parseDocument(document); // Corrected: pass only document
+    const parseOutput: ParseResult = parser.parseDocument(document);
     const expressions: ExpressionInfo[] = parseOutput.expressions;
+    const liveComments = parseOutput.liveComments;
     const syntaxDiagnosticsFromParser: vscode.Diagnostic[] = parseOutput.diagnostics;
 
     if (syntaxDiagnosticsFromParser.length > 0) {
@@ -75,8 +80,10 @@ async function evaluateEditor(
         if (expressionRange) {
             displayableResults.push({
                 text: logMessage,
+                fullText: logMessage,
                 originalRange: expressionRange,
                 isLog: true,
+                valueType: 'string'
             });
         } else {
             console.log(`[Sandbox Log - Unassociated in evaluateEditor]: ${logMessage}`);
@@ -91,7 +98,13 @@ async function evaluateEditor(
             delete (evaluationContext as any).__currentExpressionRange;
 
             if (evaluationOutput.error) {
-                displayableResults.push({ text: evaluationOutput.error, originalRange: expr.range, isError: true });
+                displayableResults.push({
+                    text: evaluationOutput.error,
+                    fullText: evaluationOutput.error,
+                    originalRange: expr.range,
+                    isError: true,
+                    valueType: 'error'
+                });
             } else {
                 let isConsoleLogCall = false;
                 const node = expr.node; // node is acorn.Node
@@ -116,19 +129,130 @@ async function evaluateEditor(
                 }
 
                 if (evaluationOutput.result !== undefined && !isConsoleLogCall) {
-                    displayableResults.push({ text: String(evaluationOutput.result), originalRange: expr.range });
+                    const result = evaluationOutput.result;
+                    let resultText: string;
+                    let fullResultText: string;
+                    let valueType: string;
+                    
+                    if (typeof result === 'object' && result !== null) {
+                        // Use util.inspect for proper object formatting
+                        fullResultText = util.inspect(result, {
+                            depth: null,
+                            maxArrayLength: null,
+                            breakLength: Infinity,
+                            compact: false
+                        });
+                        resultText = util.inspect(result, {
+                            depth: 2,
+                            maxArrayLength: 10,
+                            maxStringLength: 100,
+                            breakLength: Infinity,
+                            compact: true
+                        });
+                        valueType = Array.isArray(result) ? 'array' : 'object';
+                    } else {
+                        fullResultText = String(result);
+                        resultText = String(result);
+                        valueType = typeof result;
+                    }
+                    
+                    displayableResults.push({
+                        text: resultText,
+                        fullText: fullResultText,
+                        originalRange: expr.range,
+                        valueType: valueType
+                    });
                 }
             }
         } catch (e: any) {
             console.error(`[evaluateEditor] Error evaluating expression '${expr.text}':`, e);
             delete (evaluationContext as any).__currentExpressionRange; // Ensure cleanup on error too
-            displayableResults.push({ text: e.message || 'Unknown evaluation error', originalRange: expr.range, isError: true });
+            const errorMessage = e.message || 'Unknown evaluation error';
+            displayableResults.push({
+                text: errorMessage,
+                fullText: errorMessage,
+                originalRange: expr.range,
+                isError: true,
+                valueType: 'error'
+            });
+        }
+    }
+
+    // Evaluate live comments
+    for (const liveComment of liveComments) {
+        try {
+            const startTime = Date.now();
+            const evaluationOutput = evaluator.evaluate(liveComment.expressionText, liveComment.expressionRange, evaluationContext);
+            const endTime = Date.now();
+
+            if (evaluationOutput.error) {
+                displayableResults.push({
+                    text: `Comment Error: ${evaluationOutput.error}`,
+                    fullText: evaluationOutput.error,
+                    originalRange: liveComment.commentRange,
+                    isError: true,
+                    valueType: 'error'
+                });
+            } else {
+                let resultText: string;
+                let fullResultText: string;
+                let valueType: string;
+
+                if (typeof evaluationOutput.result === 'object' && evaluationOutput.result !== null) {
+                    fullResultText = util.inspect(evaluationOutput.result, {
+                        depth: null,
+                        maxArrayLength: null,
+                        breakLength: Infinity,
+                        compact: false
+                    });
+                    resultText = util.inspect(evaluationOutput.result, {
+                        depth: 2,
+                        maxArrayLength: 10,
+                        maxStringLength: 100,
+                        breakLength: Infinity,
+                        compact: true
+                    });
+                    valueType = Array.isArray(evaluationOutput.result) ? 'array' : 'object';
+                } else {
+                    fullResultText = String(evaluationOutput.result);
+                    resultText = String(evaluationOutput.result);
+                    valueType = typeof evaluationOutput.result;
+                }
+
+                // If timing is requested, add it to the display
+                if (liveComment.timing) {
+                    const executionTime = endTime - startTime;
+                    resultText = `${resultText} (${executionTime}ms)`;
+                    fullResultText = `${fullResultText}\n\nExecution time: ${executionTime}ms`;
+                }
+
+                displayableResults.push({
+                    text: resultText,
+                    fullText: fullResultText,
+                    originalRange: liveComment.commentRange,
+                    valueType: valueType
+                });
+            }
+        } catch (e: any) {
+            console.error(`[evaluateEditor] Error evaluating live comment '${liveComment.expressionText}':`, e);
+            displayableResults.push({
+                text: e.message || 'Unknown evaluation error',
+                fullText: e.message || 'Unknown evaluation error',
+                originalRange: liveComment.commentRange,
+                isError: true,
+                valueType: 'error'
+            });
         }
     }
 
     if (displayableResults.length > 0) {
         displayableResults.sort((a, b) => a.originalRange.start.line - b.originalRange.start.line);
         resultDecorator.displayResults(editor, displayableResults);
+        
+        // Update Value Explorer if available
+        if (valueExplorerProvider) {
+            valueExplorerProvider.updateResults(displayableResults, document);
+        }
     }
 }
 
@@ -141,6 +265,16 @@ export function activate(context: vscode.ExtensionContext) {
     const parser = new ExpressionParser();
     const evaluator = new SafeEvaluator();
     const resultDecorator = new ResultDecorator();
+
+    // Register hover provider for full value display
+    const hoverProvider = new EvaluationHoverProvider(resultDecorator);
+    context.subscriptions.push(
+        vscode.languages.registerHoverProvider(['javascript', 'typescript'], hoverProvider)
+    );
+
+    // Register Value Explorer
+    const valueExplorerProvider = new ValueExplorerProvider();
+    vscode.window.registerTreeDataProvider('kodaValueExplorer', valueExplorerProvider);
 
     liveEvaluationStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     context.subscriptions.push(liveEvaluationStatusBarItem);
@@ -159,7 +293,7 @@ export function activate(context: vscode.ExtensionContext) {
             debounceTimer = setTimeout(async () => {
                 const currentEditor = vscode.window.activeTextEditor;
                 if (currentEditor) {
-                    await evaluateEditor(currentEditor, parser, evaluator, resultDecorator, diagnostics);
+                    await evaluateEditor(currentEditor, parser, evaluator, resultDecorator, diagnostics, valueExplorerProvider);
                     
                     // Update time travel panel if open
                     if (TimeTravelPanel.currentPanel && isTimeTravelEnabled) {
@@ -173,7 +307,7 @@ export function activate(context: vscode.ExtensionContext) {
     const evaluateSelectionCommand = vscode.commands.registerCommand('jsEvaluator.evaluateSelection', async () => {
         const editor = vscode.window.activeTextEditor;
         if (editor) {
-            await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics);
+            await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics, valueExplorerProvider);
         }
     });
 
@@ -194,7 +328,7 @@ export function activate(context: vscode.ExtensionContext) {
         liveEvaluationStatusBarItem.show();
         
         console.log('Starting live evaluation...');
-        await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics);
+        await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics, valueExplorerProvider);
 
         if (textDocumentChangeDisposable) {
             textDocumentChangeDisposable.dispose();
@@ -275,6 +409,13 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
+    // Copy Value Command
+    const copyValueCommand = vscode.commands.registerCommand('jsEvaluator.copyValueFromExplorer', async (value: string) => {
+        if (value) {
+            await vscode.env.clipboard.writeText(value);
+            vscode.window.showInformationMessage('Value copied to clipboard!');
+        }
+    });
 
     context.subscriptions.push(
         evaluateSelectionCommand, 
@@ -283,7 +424,8 @@ export function activate(context: vscode.ExtensionContext) {
         clearAllResultsCommand,
         toggleTimeTravelCommand,
         showTimeTravelPanelCommand,
-        clearTimeTravelHistoryCommand
+        clearTimeTravelHistoryCommand,
+        copyValueCommand
     );
 }
 

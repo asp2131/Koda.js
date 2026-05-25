@@ -27,17 +27,65 @@ exports.ResultDecorator = void 0;
 const vscode = __importStar(require("vscode"));
 class ResultDecorator {
     constructor() {
-        // Define the style for our inline result display
-        // Blue color similar to Quokka's evaluation results
-        this.decorationType = vscode.window.createTextEditorDecorationType({
+        // Store full results for hover provider
+        this.resultCache = new Map();
+        // String values - Green
+        this.stringDecorationType = vscode.window.createTextEditorDecorationType({
             after: {
-                color: '#4A90E2',
+                color: '#98C379',
                 fontStyle: 'italic',
-                margin: '0 0 0 1em', // Add some space before the decoration
+                margin: '0 0 0 1em',
             },
-            // We can add more styles for errors, logs, etc. later by creating more decoration types
         });
-        // Define a more prominent style for syntax errors
+        // Number values - Blue
+        this.numberDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                color: '#61AFEF',
+                fontStyle: 'italic',
+                margin: '0 0 0 1em',
+            },
+        });
+        // Boolean values - Purple
+        this.booleanDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                color: '#C678DD',
+                fontStyle: 'italic',
+                margin: '0 0 0 1em',
+            },
+        });
+        // Object/Array values - Gray
+        this.objectDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                color: '#ABB2BF',
+                fontStyle: 'italic',
+                margin: '0 0 0 1em',
+            },
+        });
+        // undefined/null values - Gray italic (more subtle)
+        this.undefinedDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                color: '#5C6370',
+                fontStyle: 'italic',
+                margin: '0 0 0 1em',
+            },
+        });
+        // Default/Function/Symbol - Yellow/Orange
+        this.defaultDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                color: '#E5C07B',
+                fontStyle: 'italic',
+                margin: '0 0 0 1em',
+            },
+        });
+        // Log messages - Cyan
+        this.logDecorationType = vscode.window.createTextEditorDecorationType({
+            after: {
+                color: '#56B6C2',
+                fontStyle: 'italic',
+                margin: '0 0 0 1em',
+            },
+        });
+        // Error messages - Red with background
         this.errorDecorationType = vscode.window.createTextEditorDecorationType({
             after: {
                 color: new vscode.ThemeColor('errorForeground'),
@@ -50,17 +98,49 @@ class ResultDecorator {
             borderColor: new vscode.ThemeColor('errorBorder'),
         });
     }
+    /**
+     * Truncate a value string for inline display
+     */
+    truncateValue(value, maxLength = 50) {
+        if (value.length <= maxLength)
+            return value;
+        return value.substring(0, maxLength) + '...';
+    }
+    /**
+     * Get the appropriate decoration type based on value type
+     */
+    getDecorationTypeForValueType(valueType) {
+        switch (valueType) {
+            case 'string':
+                return this.stringDecorationType;
+            case 'number':
+                return this.numberDecorationType;
+            case 'boolean':
+                return this.booleanDecorationType;
+            case 'object':
+                return this.objectDecorationType;
+            case 'undefined':
+            case 'null':
+                return this.undefinedDecorationType;
+            default:
+                return this.defaultDecorationType;
+        }
+    }
     displayResults(editor, results) {
         console.log('[ResultDecorator] displayResults called. Number of results:', results.length);
-        console.log('[ResultDecorator] Results data:', JSON.stringify(results, null, 2)); // Log the actual data
-        const regularDecorations = [];
-        const errorDecorations = [];
+        // Clear cache and rebuild
+        this.resultCache.clear();
+        // Group decorations by type
+        const decorationsByType = new Map();
         results.forEach(result => {
-            const decorationRange = result.originalRange; // Anchor to the expression itself
+            const decorationRange = result.originalRange;
+            const cacheKey = `${editor.document.uri.toString()}_${decorationRange.start.line}_${decorationRange.start.character}`;
+            // Cache the full result for hover
+            this.resultCache.set(cacheKey, result);
             const prefix = result.isError ? 'Error: ' : result.isLog ? 'log: ' : '=> ';
-            // Ensure textContent is a string and handle undefined results
-            const textValue = result.text === undefined ? 'undefined' : result.text;
-            const textContentString = String(textValue).replace(/\n/g, '\\n'); // Escape newlines
+            // Truncate the display text
+            const truncatedText = this.truncateValue(result.text);
+            const textContentString = truncatedText.replace(/\n/g, '\\n'); // Escape newlines
             const decorationOption = {
                 range: decorationRange,
                 renderOptions: {
@@ -68,18 +148,50 @@ class ResultDecorator {
                         contentText: ` // ${prefix}${textContentString}`,
                     },
                 },
+                // Store the cache key in the decoration for hover lookup
+                hoverMessage: this.createHoverMessage(result)
             };
+            // Determine which decoration type to use
+            let decorationType;
             if (result.isError) {
-                errorDecorations.push(decorationOption);
+                decorationType = this.errorDecorationType;
+            }
+            else if (result.isLog) {
+                decorationType = this.logDecorationType;
             }
             else {
-                regularDecorations.push(decorationOption);
+                decorationType = this.getDecorationTypeForValueType(result.valueType);
             }
+            // Add to appropriate group
+            if (!decorationsByType.has(decorationType)) {
+                decorationsByType.set(decorationType, []);
+            }
+            decorationsByType.get(decorationType).push(decorationOption);
         });
-        console.log('[ResultDecorator] Applying regular decorations:', regularDecorations.length);
-        console.log('[ResultDecorator] Applying error decorations:', errorDecorations.length);
-        editor.setDecorations(this.decorationType, regularDecorations);
-        editor.setDecorations(this.errorDecorationType, errorDecorations);
+        // Apply all decorations
+        this.clearDecorations(editor);
+        decorationsByType.forEach((decorations, decorationType) => {
+            editor.setDecorations(decorationType, decorations);
+        });
+        console.log('[ResultDecorator] Applied decorations for', decorationsByType.size, 'types');
+    }
+    /**
+     * Create a hover message for a result
+     */
+    createHoverMessage(result) {
+        const hoverMessage = new vscode.MarkdownString();
+        hoverMessage.isTrusted = true;
+        if (result.isError) {
+            hoverMessage.appendCodeblock(result.fullText, 'javascript');
+        }
+        else {
+            hoverMessage.appendMarkdown(`**Type:** \`${result.valueType || 'unknown'}\`\n\n`);
+            hoverMessage.appendCodeblock(result.fullText, 'javascript');
+            if (result.text !== result.fullText) {
+                hoverMessage.appendMarkdown('\n*Value truncated for inline display*');
+            }
+        }
+        return hoverMessage;
     }
     displaySyntaxErrors(editor, diagnostics) {
         console.log(`[ResultDecorator] displaySyntaxErrors called with ${diagnostics.length} diagnostics`);
@@ -87,8 +199,6 @@ class ResultDecorator {
             const errorText = diagnostic.message.length > 50
                 ? diagnostic.message.substring(0, 50) + '...'
                 : diagnostic.message;
-            console.log(`[ResultDecorator] Diagnostic ${index}: range=${diagnostic.range.start.line}:${diagnostic.range.start.character}-${diagnostic.range.end.line}:${diagnostic.range.end.character}, message="${errorText}"`);
-            // Add line information to the error message for better context
             const lineInfo = `Line ${diagnostic.range.start.line + 1}: `;
             const fullErrorText = lineInfo + errorText;
             return {
@@ -98,17 +208,37 @@ class ResultDecorator {
                         contentText: ` // Syntax Error: ${fullErrorText}`,
                     },
                 },
+                hoverMessage: new vscode.MarkdownString().appendCodeblock(diagnostic.message, 'javascript')
             };
         });
-        console.log(`[ResultDecorator] Applying ${syntaxErrorDecorations.length} syntax error decorations`);
         editor.setDecorations(this.errorDecorationType, syntaxErrorDecorations);
     }
     clearDecorations(editor) {
-        editor.setDecorations(this.decorationType, []);
+        editor.setDecorations(this.stringDecorationType, []);
+        editor.setDecorations(this.numberDecorationType, []);
+        editor.setDecorations(this.booleanDecorationType, []);
+        editor.setDecorations(this.objectDecorationType, []);
+        editor.setDecorations(this.undefinedDecorationType, []);
+        editor.setDecorations(this.defaultDecorationType, []);
+        editor.setDecorations(this.logDecorationType, []);
         editor.setDecorations(this.errorDecorationType, []);
+        this.resultCache.clear();
+    }
+    /**
+     * Get cached result for hover provider
+     */
+    getCachedResult(documentUri, line, character) {
+        const cacheKey = `${documentUri}_${line}_${character}`;
+        return this.resultCache.get(cacheKey);
     }
     dispose() {
-        this.decorationType.dispose();
+        this.stringDecorationType.dispose();
+        this.numberDecorationType.dispose();
+        this.booleanDecorationType.dispose();
+        this.objectDecorationType.dispose();
+        this.undefinedDecorationType.dispose();
+        this.defaultDecorationType.dispose();
+        this.logDecorationType.dispose();
         this.errorDecorationType.dispose();
     }
 }

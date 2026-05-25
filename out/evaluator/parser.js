@@ -52,8 +52,7 @@ class ExpressionParser {
                 allowReserved: true // Allow reserved words in non-strict mode contexts
             }); // Type assertion for top-level body
             console.log('AST generated:', ast);
-            // Placeholder: Iterate through top-level statements in the AST body
-            // More sophisticated logic will be needed to extract meaningful expressions.
+            // Iterate through top-level statements in the AST body
             if (ast.body && Array.isArray(ast.body)) {
                 ast.body.forEach(node => {
                     if (node.range && node.loc) {
@@ -61,11 +60,27 @@ class ExpressionParser {
                         const endPos = document.positionAt(node.range[1]);
                         const range = new vscode.Range(startPos, endPos);
                         const text = document.getText(range);
+                        // Determine the type of expression
+                        let type = 'statement';
+                        if (node.type === 'ExpressionStatement') {
+                            const exprStatement = node;
+                            if (exprStatement.expression.type === 'Identifier') {
+                                type = 'identifier';
+                            }
+                            else {
+                                type = 'expression';
+                            }
+                        }
                         expressions.push({
                             text: text,
                             range: range,
-                            node: node
+                            node: node,
+                            type: type
                         });
+                        // If this is a statement with nested expressions, extract them too
+                        if (type === 'statement' || type === 'expression') {
+                            this.extractNestedExpressions(node, document, expressions);
+                        }
                     }
                 });
             }
@@ -135,7 +150,140 @@ class ExpressionParser {
                 console.log(`[Parser] Created unknown error diagnostic:`, diagnostic);
             }
         } // End of try-catch block
-        return { expressions, diagnostics };
+        // Parse live comments
+        const liveComments = this.parseLiveComments(document, code);
+        return { expressions, liveComments, diagnostics };
+    }
+    /**
+     * Parse live comments from the document
+     */
+    parseLiveComments(document, code) {
+        const liveComments = [];
+        const lines = code.split('\n');
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const line = lines[lineIndex];
+            // Check for block comment
+            const blockCommentRegex = new RegExp('\\/\\*\\?(\\.)?\\*\\/', 'g');
+            let match;
+            while ((match = blockCommentRegex.exec(line)) !== null) {
+                const commentStart = match.index;
+                // Find the expression before the comment
+                const textBeforeComment = line.substring(0, commentStart).trim();
+                // Try to find a complete expression before the comment
+                let expressionText = '';
+                let expressionStart = 0;
+                // Look backwards for the start of an expression
+                const terminators = [';', '{', '}', '(', ')', ',', '='];
+                for (let i = textBeforeComment.length - 1; i >= 0; i--) {
+                    if (terminators.includes(textBeforeComment[i])) {
+                        expressionStart = i + 1;
+                        break;
+                    }
+                }
+                expressionText = textBeforeComment.substring(expressionStart).trim();
+                if (expressionText) {
+                    const expressionStartPos = new vscode.Position(lineIndex, expressionStart);
+                    const expressionEndPos = new vscode.Position(lineIndex, expressionStart + expressionText.length);
+                    const commentStartPos = new vscode.Position(lineIndex, commentStart);
+                    const commentEndPos = new vscode.Position(lineIndex, commentStart + match[0].length);
+                    liveComments.push({
+                        expressionRange: new vscode.Range(expressionStartPos, expressionEndPos),
+                        expressionText: expressionText,
+                        commentRange: new vscode.Range(commentStartPos, commentEndPos),
+                        commentType: 'block',
+                        timing: match[1] === '.'
+                    });
+                }
+            }
+            // Check for line comment
+            const lineCommentRegex = new RegExp('\\/\\/\\?(\\.)?(.*)$');
+            const lineMatch = line.match(lineCommentRegex);
+            if (lineMatch && lineMatch.index !== undefined) {
+                const commentStart = lineMatch.index;
+                const textBeforeComment = line.substring(0, commentStart).trim();
+                // Remove trailing semicolon if present
+                const expressionText = textBeforeComment.replace(/;$/, '');
+                if (expressionText) {
+                    const expressionStartPos = new vscode.Position(lineIndex, 0);
+                    const expressionEndPos = new vscode.Position(lineIndex, textBeforeComment.length);
+                    const commentStartPos = new vscode.Position(lineIndex, commentStart);
+                    const commentEndPos = new vscode.Position(lineIndex, line.length);
+                    liveComments.push({
+                        expressionRange: new vscode.Range(expressionStartPos, expressionEndPos),
+                        expressionText: expressionText,
+                        commentRange: new vscode.Range(commentStartPos, commentEndPos),
+                        commentType: 'line',
+                        timing: lineMatch[1] === '.'
+                    });
+                }
+            }
+        }
+        return liveComments;
+    }
+    /**
+     * Recursively extract identifier expressions from AST nodes
+     * This allows showing values when users just type a variable name
+     */
+    extractNestedExpressions(node, document, expressions) {
+        // Track parent nodes to avoid extracting identifiers that are part of member expressions
+        const walk = (n, parent) => {
+            // If this is an identifier, check if it should be added
+            if (n.type === 'Identifier' && n.range) {
+                // Skip identifiers that are:
+                // 1. Part of a MemberExpression (e.g., 'console' in console.log)
+                // 2. Part of a CallExpression callee (e.g., function name in fn())
+                // 3. Property names in objects
+                if (parent) {
+                    if (parent.type === 'MemberExpression') {
+                        const memberExpr = parent;
+                        // Skip if this identifier is the object or property of a member expression
+                        if (memberExpr.object === n || memberExpr.property === n) {
+                            // Still walk children but don't add this identifier
+                            return;
+                        }
+                    }
+                    if (parent.type === 'CallExpression') {
+                        const callExpr = parent;
+                        // Skip if this identifier is the callee
+                        if (callExpr.callee === n) {
+                            return;
+                        }
+                    }
+                }
+                const startPos = document.positionAt(n.range[0]);
+                const endPos = document.positionAt(n.range[1]);
+                const range = new vscode.Range(startPos, endPos);
+                // Only add if it's not already in the list
+                const text = document.getText(range);
+                const alreadyExists = expressions.some(e => e.range.start.line === range.start.line &&
+                    e.range.start.character === range.start.character);
+                if (!alreadyExists) {
+                    expressions.push({
+                        text: text,
+                        range: range,
+                        node: n,
+                        type: 'identifier'
+                    });
+                }
+            }
+            // Recursively walk child nodes
+            for (const key of Object.keys(n)) {
+                const value = n[key];
+                if (value && typeof value === 'object') {
+                    if (Array.isArray(value)) {
+                        value.forEach(child => {
+                            if (child && typeof child === 'object' && 'type' in child) {
+                                walk(child, n);
+                            }
+                        });
+                    }
+                    else if ('type' in value) {
+                        walk(value, n);
+                    }
+                }
+            }
+        };
+        walk(node);
     }
 }
 exports.ExpressionParser = ExpressionParser;
