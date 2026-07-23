@@ -34,7 +34,7 @@ class TimeTravelPanel {
             TimeTravelPanel.currentPanel._update();
             return;
         }
-        const panel = vscode.window.createWebviewPanel('timeTravelDebugger', 'Koda Time Travel', column, { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')] });
+        const panel = vscode.window.createWebviewPanel('timeTravelDebugger', 'Koda Debugger', column, { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')] });
         TimeTravelPanel.currentPanel = new TimeTravelPanel(panel, extensionUri, timeTravelDebugger);
     }
     constructor(panel, _extensionUri, timeTravelDebugger) {
@@ -70,6 +70,11 @@ class TimeTravelPanel {
                 case 'goToStep':
                     this._navigate(ttd.goToStep(message.index));
                     return;
+                case 'goToLine':
+                    if (typeof message.line === 'number') {
+                        this._highlightLine(message.line, true, ttd.getCurrentStep()?.documentUri);
+                    }
+                    return;
                 case 'clearHistory':
                     ttd.clearHistory();
                     this._clearHighlight();
@@ -99,20 +104,22 @@ class TimeTravelPanel {
      * focus, so `activeTextEditor` is undefined — fall back to the first visible
      * JS/TS editor.
      */
-    _targetEditor() {
+    _targetEditor(documentUri) {
         const isCode = (e) => e.document.languageId === 'javascript' || e.document.languageId === 'typescript';
-        const active = vscode.window.activeTextEditor;
-        if (active && isCode(active)) {
-            return active;
-        }
-        return vscode.window.visibleTextEditors.find(isCode);
+        return vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === documentUri)
+            ?? (vscode.window.activeTextEditor && isCode(vscode.window.activeTextEditor)
+                ? vscode.window.activeTextEditor
+                : vscode.window.visibleTextEditors.find(isCode));
     }
     _highlightStep(step, reveal) {
-        const editor = this._targetEditor();
-        if (!editor || step.line < 1 || step.line > editor.document.lineCount) {
+        this._highlightLine(step.line, reveal, step.documentUri);
+    }
+    _highlightLine(line, reveal, documentUri) {
+        const editor = this._targetEditor(documentUri);
+        if (!editor || line < 1 || line > editor.document.lineCount) {
             return;
         }
-        const lineIdx = step.line - 1;
+        const lineIdx = line - 1;
         const range = new vscode.Range(lineIdx, 0, lineIdx, editor.document.lineAt(lineIdx).text.length);
         editor.setDecorations(this._lineHighlight, [range]);
         if (reveal) {
@@ -120,7 +127,7 @@ class TimeTravelPanel {
         }
     }
     _clearHighlight() {
-        this._targetEditor()?.setDecorations(this._lineHighlight, []);
+        this._targetEditor(this.timeTravelDebugger.getCurrentStep()?.documentUri)?.setDecorations(this._lineHighlight, []);
     }
     update() {
         this._update();
@@ -139,6 +146,7 @@ class TimeTravelPanel {
     }
     _kindColor(kind) {
         switch (kind) {
+            case 'step': return '#61AFEF'; // blue
             case 'log': return '#D19A66'; // orange
             case 'error': return '#E06C75'; // red
             default: return '#98C379'; // green (value)
@@ -149,16 +157,17 @@ class TimeTravelPanel {
         const currentIndex = this.timeTravelDebugger.getCurrentStepIndex();
         const current = this.timeTravelDebugger.getCurrentStep();
         const errorCount = steps.filter(s => s.kind === 'error').length;
+        const callStack = current?.stack ?? [];
         const stepRows = steps.length === 0
-            ? `<div class="empty">No execution history yet.<br/>Start live evaluation to watch your code run, step by step.</div>`
+            ? `<div class="empty">No execution history yet.<br/>Open a JavaScript or TypeScript file and run it to record each step.</div>`
             : steps.map(step => {
                 const isCurrent = step.index === currentIndex;
                 const dot = `<span class="dot" style="background:${this._kindColor(step.kind)}"></span>`;
                 const ref = `<span class="ref">${step.line}:1</span>`;
-                const expanded = isCurrent
+                const expanded = isCurrent && step.full
                     ? `<pre class="full">${this._escapeHtml(step.full)}</pre>`
                     : '';
-                const copyBtn = isCurrent
+                const copyBtn = isCurrent && step.full
                     ? `<button class="icon copy" title="Copy value" onclick="event.stopPropagation();copy(${step.index})">⧉</button>`
                     : '';
                 return `
@@ -169,10 +178,17 @@ class TimeTravelPanel {
                         ${ref}
                         ${copyBtn}
                     </div>
-                    ${step.lineText ? `<div class="src">${this._escapeHtml(step.lineText)}</div>` : ''}
+                    ${step.kind !== 'step' && step.lineText ? `<div class="src">${this._escapeHtml(step.lineText)}</div>` : ''}
                     ${expanded}
                 </div>`;
             }).join('');
+        const stackRows = callStack.length === 0
+            ? '<div class="empty compact">No call stack for this step.</div>'
+            : callStack.map((frame, index) => `
+                <button class="frame ${index === 0 ? 'active' : ''}" onclick="goToLine(${frame.line})">
+                    <span class="frame-name">${this._escapeHtml(frame.name)}</span>
+                    <span class="ref">${frame.line}:${frame.column}</span>
+                </button>`).join('');
         const counter = steps.length === 0 ? '0 / 0' : `${currentIndex + 1} / ${steps.length}`;
         const canBack = this.timeTravelDebugger.canStepBack();
         const canFwd = this.timeTravelDebugger.canStepForward();
@@ -208,16 +224,26 @@ class TimeTravelPanel {
     .toolbar .counter { margin-left: auto; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
     .columns { display: flex; }
     .logs { flex: 1; min-width: 0; padding: 8px 0; }
-    .errors {
-        width: 180px; border-left: 1px solid var(--vscode-widget-border, #333);
-        padding: 12px; color: var(--vscode-descriptionForeground);
+    .debug-sidebar {
+        width: 260px; border-left: 1px solid var(--vscode-widget-border, #333);
+        color: var(--vscode-descriptionForeground);
     }
-    .errors.has { color: #E06C75; }
+    .error-count { padding: 10px 12px; }
+    .error-count.has { color: #E06C75; }
     .section-title {
         font-weight: 600; letter-spacing: .06em; font-size: .85em;
         padding: 0 12px 6px; color: var(--vscode-descriptionForeground);
         border-bottom: 1px solid var(--vscode-widget-border, #333); margin-bottom: 6px;
     }
+    .frame {
+        width: 100%; display: flex; align-items: center; gap: 8px;
+        padding: 7px 12px; border: 0; background: transparent;
+        color: var(--vscode-foreground); text-align: left; cursor: pointer;
+        font-family: var(--vscode-editor-font-family);
+    }
+    .frame:hover { background: var(--vscode-list-hoverBackground); }
+    .frame.active { border-left: 2px solid var(--vscode-focusBorder); }
+    .frame-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .step { padding: 6px 12px; cursor: pointer; border-left: 3px solid transparent; }
     .step:hover { background: var(--vscode-list-hoverBackground); }
     .step.current {
@@ -244,11 +270,16 @@ class TimeTravelPanel {
         white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto;
     }
     .empty { padding: 40px 20px; text-align: center; color: var(--vscode-descriptionForeground); line-height: 1.6; }
+    .empty.compact { padding: 16px 12px; font-size: .85em; }
+    @media (max-width: 700px) {
+        .columns { display: block; }
+        .debug-sidebar { width: auto; border-left: 0; border-top: 1px solid var(--vscode-widget-border, #333); }
+    }
 </style>
 </head>
 <body>
     <div class="toolbar">
-        <span class="title">KODA</span>
+        <span class="title">KODA DEBUGGER</span>
         <button title="First (⏮)" onclick="cmd('firstStep')" ${canBack ? '' : 'disabled'}>⏮</button>
         <button title="Step back (◀)" onclick="cmd('stepBack')" ${canBack ? '' : 'disabled'}>◀</button>
         <button title="Step forward (▶)" onclick="cmd('stepForward')" ${canFwd ? '' : 'disabled'}>▶</button>
@@ -259,18 +290,24 @@ class TimeTravelPanel {
     </div>
     <div class="columns">
         <div class="logs">
-            <div class="section-title">LOGS</div>
+            <div class="section-title">EXECUTION</div>
             ${stepRows}
         </div>
-        <div class="errors ${errorCount > 0 ? 'has' : ''}">
-            ${errorCount > 0 ? `${errorCount} ERROR${errorCount > 1 ? 'S' : ''}` : 'NO ERRORS'}
-        </div>
+        <aside class="debug-sidebar">
+            <div class="section-title">CALL STACK</div>
+            ${stackRows}
+            <div class="section-title">EXCEPTIONS</div>
+            <div class="error-count ${errorCount > 0 ? 'has' : ''}">
+                ${errorCount > 0 ? `${errorCount} ERROR${errorCount > 1 ? 'S' : ''}` : 'NO ERRORS'}
+            </div>
+        </aside>
     </div>
     <script>
         const vscode = acquireVsCodeApi();
         const FULL = ${fullForCopy};
         function cmd(c) { vscode.postMessage({ command: c }); }
         function goToStep(i) { vscode.postMessage({ command: 'goToStep', index: i }); }
+        function goToLine(line) { vscode.postMessage({ command: 'goToLine', line }); }
         function copy(i) { vscode.postMessage({ command: 'copy', text: FULL[i] }); }
     </script>
 </body>

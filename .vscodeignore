@@ -1,7 +1,10 @@
 .vscode/**
 .vscode-test/**
+**/.DS_Store
+.tool-versions
 # node_modules/** (Removed to include runtime dependencies like acorn)
 src/**
+test/**
 out/test/**
 *.vsix
 *.log

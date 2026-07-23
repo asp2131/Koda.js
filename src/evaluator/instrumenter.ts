@@ -9,9 +9,9 @@ import * as acorn from 'acorn';
  * it unchanged. Because capture is transparent, we can wrap any expression
  * without altering program behaviour or running side effects more than once.
  *
- * A line marker (`globalThis.__kodaLine = N`) is emitted before every statement
- * so that the child-process console override can associate user `console.log`
- * output with the originating source line.
+ * A step hook (`globalThis.__kodaStep(N)`) is emitted before every statement so
+ * the debugger records statement execution and the active call stack. It also
+ * lets the console override associate output with the originating source line.
  */
 
 interface Edit {
@@ -74,8 +74,8 @@ export function instrument(code: string): string {
     }
     const line = node.loc.start.line;
 
-    // Line marker before the statement (order 0 = before any wrapper at same pos).
-    mark(node.range[0], `globalThis.__kodaLine=${line};`, 0);
+    // Debugger step before the statement (order 0 = before any wrapper at same pos).
+    mark(node.range[0], `globalThis.__kodaStep(${line});`, 0);
 
     switch (node.type) {
       case 'ExpressionStatement':
@@ -146,6 +146,15 @@ export function instrument(code: string): string {
         node.declarations.forEach((d: any) => d.init && descend(d.init));
         break;
       default:
+        // Find function bodies nested in calls, object properties, classes, and
+        // other expressions without maintaining a second AST walker.
+        for (const value of Object.values(node)) {
+          if (Array.isArray(value)) {
+            value.forEach(child => child && typeof child === 'object' && 'type' in child && descend(child));
+          } else if (value && typeof value === 'object' && 'type' in value) {
+            descend(value);
+          }
+        }
         break;
     }
   };

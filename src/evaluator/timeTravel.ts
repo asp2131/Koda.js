@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CaptureRecord } from './liveRunner';
+import { CaptureRecord, StackFrame } from './liveRunner';
 
 /**
  * One step in the execution timeline. Built directly from a CaptureRecord
@@ -11,10 +11,12 @@ export interface ExecutionStep {
     index: number;
     line: number;        // 1-based source line
     lineText: string;    // trimmed source of that line, for context in the panel
-    kind: 'value' | 'log' | 'error';
-    short: string;       // inline-style value
+    kind: CaptureRecord['kind'];
+    short: string;       // inline-style value or source for statement steps
     full: string;        // expanded value (hover / tree)
     valueType: string;
+    stack: StackFrame[];
+    documentUri?: string;
 }
 
 /**
@@ -28,17 +30,22 @@ export class TimeTravelDebugger {
     /** Replace the timeline from a fresh run's records. */
     load(records: CaptureRecord[], document?: vscode.TextDocument): void {
         const lineCount = document?.lineCount ?? 0;
-        this.steps = records.map((r, i) => ({
-            index: i,
-            line: r.line,
-            lineText: document && r.line >= 1 && r.line <= lineCount
+        this.steps = records.map((r, i) => {
+            const lineText = document && r.line >= 1 && r.line <= lineCount
                 ? document.lineAt(r.line - 1).text.trim()
-                : '',
-            kind: r.kind,
-            short: r.short,
-            full: r.full,
-            valueType: r.valueType
-        }));
+                : '';
+            return {
+                index: i,
+                line: r.line,
+                lineText,
+                kind: r.kind,
+                short: r.kind === 'step' ? lineText || 'Statement' : r.short,
+                full: r.full,
+                valueType: r.valueType,
+                stack: r.stack,
+                documentUri: document?.uri.toString()
+            };
+        });
         this.currentStepIndex = this.steps.length - 1;
     }
 

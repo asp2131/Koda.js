@@ -70,8 +70,8 @@ function instrument(code) {
             return;
         }
         const line = node.loc.start.line;
-        // Line marker before the statement (order 0 = before any wrapper at same pos).
-        mark(node.range[0], `globalThis.__kodaLine=${line};`, 0);
+        // Debugger step before the statement (order 0 = before any wrapper at same pos).
+        mark(node.range[0], `globalThis.__kodaStep(${line});`, 0);
         switch (node.type) {
             case 'ExpressionStatement':
                 if (!isConsoleCall(node.expression)) {
@@ -142,6 +142,16 @@ function instrument(code) {
                 node.declarations.forEach((d) => d.init && descend(d.init));
                 break;
             default:
+                // Find function bodies nested in calls, object properties, classes, and
+                // other expressions without maintaining a second AST walker.
+                for (const value of Object.values(node)) {
+                    if (Array.isArray(value)) {
+                        value.forEach(child => child && typeof child === 'object' && 'type' in child && descend(child));
+                    }
+                    else if (value && typeof value === 'object' && 'type' in value) {
+                        descend(value);
+                    }
+                }
                 break;
         }
     };

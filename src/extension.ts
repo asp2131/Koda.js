@@ -31,7 +31,7 @@ const liveRunner = new LiveRunner();
 function recordsToDisplay(records: CaptureRecord[], document: vscode.TextDocument): EvaluationResultDisplay[] {
     const byLine = new Map<number, CaptureRecord[]>();
     for (const r of records) {
-        if (r.line < 1 || r.line > document.lineCount) {
+        if (r.kind === 'step' || r.line < 1 || r.line > document.lineCount) {
             continue;
         }
         const list = byLine.get(r.line);
@@ -83,7 +83,7 @@ async function evaluateEditor(
     }
 
     if (editor.document.languageId !== 'javascript' && editor.document.languageId !== 'typescript') {
-        if (!isLiveEvaluationActive) {
+        if (!isLiveEvaluationActive && !isTimeTravelEnabled) {
             vscode.window.showInformationMessage('Please use this extension with a JavaScript or TypeScript file.');
         }
         return;
@@ -108,7 +108,7 @@ async function evaluateEditor(
         currentDiagnostics.set(document.uri, enhancedDiagnostics);
         resultDecorator.displaySyntaxErrors(editor, enhancedDiagnostics);
 
-        if (!isLiveEvaluationActive) {
+        if (!isLiveEvaluationActive && !isTimeTravelEnabled) {
             vscode.window.showErrorMessage('Syntax errors found. See Problems panel and inline decorations.');
         }
         return;
@@ -177,6 +177,13 @@ export function activate(context: vscode.ExtensionContext) {
     const valueExplorerProvider = new ValueExplorerProvider();
     vscode.window.registerTreeDataProvider('kodaValueExplorer', valueExplorerProvider);
 
+    const kodaStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 101);
+    kodaStatusBarItem.text = '$(code) Koda.js';
+    kodaStatusBarItem.tooltip = 'Open Koda.js actions';
+    kodaStatusBarItem.command = 'jsEvaluator.showStatusBarMenu';
+    kodaStatusBarItem.show();
+    context.subscriptions.push(kodaStatusBarItem);
+
     liveEvaluationStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     context.subscriptions.push(liveEvaluationStatusBarItem);
 
@@ -185,9 +192,9 @@ export function activate(context: vscode.ExtensionContext) {
     timeTravelStatusBarItem.command = 'jsEvaluator.showTimeTravelPanel';
     context.subscriptions.push(timeTravelStatusBarItem);
 
-    // Enhanced text document change handler with time travel integration
+    // One listener serves both live results and debugger recording.
     const enhancedTextDocumentChange = (event: vscode.TextDocumentChangeEvent) => {
-        if (isLiveEvaluationActive && event.document === vscode.window.activeTextEditor?.document) {
+        if ((isLiveEvaluationActive || isTimeTravelEnabled) && event.document === vscode.window.activeTextEditor?.document) {
             if (debounceTimer) {
                 clearTimeout(debounceTimer);
             }
@@ -195,20 +202,38 @@ export function activate(context: vscode.ExtensionContext) {
                 const currentEditor = vscode.window.activeTextEditor;
                 if (currentEditor) {
                     await evaluateEditor(currentEditor, parser, evaluator, resultDecorator, diagnostics, valueExplorerProvider);
-
-                    // Update time travel panel if open
-                    if (TimeTravelPanel.currentPanel && isTimeTravelEnabled) {
-                        TimeTravelPanel.currentPanel.update();
-                    }
                 }
             }, 500);
         }
     };
+    textDocumentChangeDisposable = vscode.workspace.onDidChangeTextDocument(enhancedTextDocumentChange);
+    context.subscriptions.push(textDocumentChangeDisposable);
 
     const evaluateSelectionCommand = vscode.commands.registerCommand('jsEvaluator.evaluateSelection', async () => {
         const editor = vscode.window.activeTextEditor;
         if (editor) {
             await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics, valueExplorerProvider);
+        }
+    });
+
+    const showStatusBarMenuCommand = vscode.commands.registerCommand('jsEvaluator.showStatusBarMenu', async () => {
+        const action = await vscode.window.showQuickPick([
+            {
+                label: isLiveEvaluationActive ? '$(debug-stop) Stop Live Evaluation' : '$(play) Start Live Evaluation',
+                command: isLiveEvaluationActive ? 'jsEvaluator.stopLiveEvaluation' : 'jsEvaluator.startLiveEvaluation'
+            },
+            { label: '$(run) Evaluate Selection', command: 'jsEvaluator.evaluateSelection' },
+            { label: '$(clear-all) Clear All Results', command: 'jsEvaluator.clearAllResults' },
+            {
+                label: isTimeTravelEnabled ? '$(history) Disable Time Travel' : '$(history) Enable Time Travel',
+                command: 'jsEvaluator.toggleTimeTravel'
+            },
+            { label: '$(open-preview) Show Time Travel Panel', command: 'jsEvaluator.showTimeTravelPanel' },
+            { label: '$(trash) Clear Time Travel History', command: 'jsEvaluator.clearTimeTravelHistory' }
+        ], { placeHolder: 'Choose a Koda.js action' });
+
+        if (action) {
+            await vscode.commands.executeCommand(action.command);
         }
     });
 
@@ -230,12 +255,6 @@ export function activate(context: vscode.ExtensionContext) {
 
         console.log('Starting live evaluation...');
         await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics, valueExplorerProvider);
-
-        if (textDocumentChangeDisposable) {
-            textDocumentChangeDisposable.dispose();
-        }
-        textDocumentChangeDisposable = vscode.workspace.onDidChangeTextDocument(enhancedTextDocumentChange);
-        context.subscriptions.push(textDocumentChangeDisposable);
         vscode.window.showInformationMessage('JavaScript Live Evaluation Started.');
     });
 
@@ -244,10 +263,6 @@ export function activate(context: vscode.ExtensionContext) {
         isLiveEvaluationActive = false;
         liveEvaluationStatusBarItem.hide();
 
-        if (textDocumentChangeDisposable) {
-            textDocumentChangeDisposable.dispose();
-            textDocumentChangeDisposable = undefined;
-        }
         if (debounceTimer) {
             clearTimeout(debounceTimer);
             debounceTimer = undefined;
@@ -273,22 +288,25 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Time Travel Debugging Commands
-    const toggleTimeTravelCommand = vscode.commands.registerCommand('jsEvaluator.toggleTimeTravel', () => {
+    const toggleTimeTravelCommand = vscode.commands.registerCommand('jsEvaluator.toggleTimeTravel', async () => {
         isTimeTravelEnabled = !isTimeTravelEnabled;
 
         if (isTimeTravelEnabled) {
             evaluator.enableTimeTravel();
-            timeTravelStatusBarItem.text = "$(history) Time Travel";
-            timeTravelStatusBarItem.tooltip = "Time Travel Debugging is Active - Click to open panel";
+            timeTravelStatusBarItem.text = "$(debug-alt) Koda Debugger";
+            timeTravelStatusBarItem.tooltip = "Koda Debugger is Active - Click to open panel";
             timeTravelStatusBarItem.show();
-            vscode.window.showInformationMessage('Time Travel Debugging enabled! Start coding to see execution history.');
-
-            // Auto-open the time travel panel
             TimeTravelPanel.createOrShow(context.extensionUri, evaluator.getTimeTravelDebugger());
+
+            const editor = vscode.window.activeTextEditor;
+            if (editor && (editor.document.languageId === 'javascript' || editor.document.languageId === 'typescript')) {
+                await evaluateEditor(editor, parser, evaluator, resultDecorator, diagnostics, valueExplorerProvider);
+            }
+            vscode.window.showInformationMessage('Koda Debugger enabled.');
         } else {
             evaluator.disableTimeTravel();
             timeTravelStatusBarItem.hide();
-            vscode.window.showInformationMessage('Time Travel Debugging disabled.');
+            vscode.window.showInformationMessage('Koda Debugger disabled.');
         }
     });
 
@@ -320,6 +338,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         evaluateSelectionCommand,
+        showStatusBarMenuCommand,
         startLiveEvaluationCommand,
         stopLiveEvaluationCommand,
         clearAllResultsCommand,

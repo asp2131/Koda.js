@@ -63,6 +63,11 @@
         "command": "jsEvaluator.copyValueFromExplorer",
         "title": "Koda.js: Copy Value",
         "category": "Koda.js"
+      },
+      {
+        "command": "jsEvaluator.showStatusBarMenu",
+        "title": "Koda.js: Show Actions",
+        "category": "Koda.js"
       }
     ],
     "views": {
@@ -129,7 +134,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "npm run compile && node test/timeTravelSmoke.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.74.0",
