@@ -1,3 +1,5 @@
+
+
 # Koda.js
 
 <p align="center">
@@ -94,7 +96,7 @@ let result = count + 10;         // Step 4: result = 12, count = 2
 | **Koda.js: Stop Live Evaluation** | - | Disable live evaluation |
 | **Koda.js: Evaluate Selection** | - | Evaluate only selected code |
 | **Koda.js: Clear All Results** | - | Remove all inline results |
-| **Koda.js: Toggle Time Travel** | - | Enable/disable time travel debugging |
+| **Koda.js: Toggle Time Travel** | `Ctrl+Shift+T` / `Cmd+Shift+T` | Enable/disable time travel debugging |
 | **Koda.js: Open Time Travel Panel** | - | Show the time travel debugging panel |
 
 ### Settings
